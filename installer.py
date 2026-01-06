@@ -8,13 +8,13 @@ def is_tool_installed(name):
     return shutil.which(name) is not None
 
 def install_jdk_linux():
-    print("Attempting to install OpenJDK 25 on Linux...")
+    print("Attempting to install OpenJDK 21 (LTS) on Linux...")
     try:
 
 
         subprocess.check_call(["sudo", "apt-get", "update"])
         subprocess.check_call(["sudo", "apt-get", "install", "-y", "openjdk-21-jdk"])
-        print("Installed JDK 21 (LTS) as a fallback.")
+        print("Installed JDK 21 (LTS).")
     except Exception as e:
         print(f"Failed to install JDK: {e}")
 
@@ -52,7 +52,7 @@ def run_installer():
     os_name = platform.system()
 
     if os_name != "Linux":
-        print(f"Automatic installation not fully supported on {os_name} yet. Please install JDK 25 and Maven manually.")
+        print(f"Automatic installation not fully supported on {os_name} yet. Please install JDK 21 and Maven manually.")
 
 
     if not is_tool_installed("java"):
