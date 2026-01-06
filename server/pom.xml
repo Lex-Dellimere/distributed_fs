@@ -23,7 +23,7 @@
                 <configuration>
                     <archive>
                         <manifestEntries>
-                            <Main-Class>org.example.Main</Main-Class> <!-- Your main class -->
+                            <Main-Class>org.example.server.DFSServer</Main-Class> <!-- Your main class -->
                         </manifestEntries>
                     </archive>
                 </configuration>

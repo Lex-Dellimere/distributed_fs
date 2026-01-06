@@ -1,21 +1,39 @@
 package org.example.client;
 
+import java.util.Date;
+
 public class ClientInfo {
     private final int clientId;
     private final String username;
-    private final boolean authenticated; // Made final
-    private String currentDir;
+    private final Date connectedAt;
+    private String currentDirectory;
 
     public ClientInfo(int clientId, String username) {
         this.clientId = clientId;
         this.username = username;
-        this.authenticated = true;
-        this.currentDir = ".";
+        this.connectedAt = new Date();
+        this.currentDirectory = "/";
     }
+
 
     public int getClientId() { return clientId; }
     public String getUsername() { return username; }
-    public boolean isAuthenticated() { return authenticated; }
-    public String getCurrentDir() { return currentDir; }
-    public void setCurrentDir(String currentDir) { this.currentDir = currentDir; }
+
+    public Date getConnectedAt() {
+        return connectedAt;
+    }
+
+    public String getCurrentDirectory() {
+        return currentDirectory;
+    }
+
+    public void setCurrentDirectory(String dir) {
+        this.currentDirectory = dir;
+    }
+
+    @Override
+    public String toString() {
+        return String.format("Client #%d: %s (connected: %s)",
+                clientId, username, connectedAt);
+    }
 }
