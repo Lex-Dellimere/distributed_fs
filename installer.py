@@ -124,7 +124,7 @@ def run_installer():
     shutil.copy("dist/client.jar", os.path.join(dfsj_dir, "dist/client.jar"))
 
 
-    scripts = ["program.py", "cleanup.py", "remove.py", "installer.py"]
+    scripts = ["program.py", "cleanup.py", "remove.py"]
     for script in scripts:
         if os.path.exists(script):
             shutil.copy(script, os.path.join(dfsj_dir, script))
