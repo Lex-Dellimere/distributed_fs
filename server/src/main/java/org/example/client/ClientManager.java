@@ -7,13 +7,13 @@ public class ClientManager {
     private final AtomicInteger nextClientId = new AtomicInteger(1);
     private final ConcurrentHashMap<Integer, ClientInfo> clients = new ConcurrentHashMap<>();
 
-    public ClientInfo registerClient(String username) {
+    public ClientInfo registerClient(String username, String role) {
 
         int clientId = nextClientId.getAndIncrement();
-        ClientInfo clientInfo = new ClientInfo(clientId, username);
+        ClientInfo clientInfo = new ClientInfo(clientId, username, role);
         clients.put(clientId, clientInfo);
 
-        System.out.println("Client #" + clientId + " registered: " + username);
+        System.out.println("Client #" + clientId + " registered: " + username + " (" + role + ")");
         return clientInfo;
     }
 
@@ -21,7 +21,7 @@ public class ClientManager {
 
         ClientInfo client = clients.remove(clientId);
         if (client != null) {
-            System.out.println("Client #" + clientId + " unregistered: " + client.getUsername());
+            System.out.println("Client #" + clientId + " unregistered: " + client.username());
         }
     }
 
@@ -37,8 +37,9 @@ public class ClientManager {
 
         StringBuilder sb = new StringBuilder("Connected clients:\n");
         for (ClientInfo client : clients.values()) {
-            sb.append("  Client #").append(client.getClientId())
-                    .append(": ").append(client.getUsername()).append("\n");
+            sb.append("  Client #").append(client.clientId())
+                    .append(": ").append(client.username())
+                    .append(" [").append(client.role()).append("]\n");
         }
         return sb.toString().trim();
     }

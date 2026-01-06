@@ -8,8 +8,8 @@ import java.net.Socket;
 import java.util.concurrent.*;
 
 public class Connection {
-    private final String host;
-    private final int port;
+    private String host;
+    private int port;
     private final BlockingQueue<String> sendQueue = new LinkedBlockingQueue<>();
     private final BlockingQueue<String> responseQueue = new LinkedBlockingQueue<>();
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -20,15 +20,37 @@ public class Connection {
     private volatile boolean authenticated = false;
     private volatile int clientId = -1;
     private volatile String username = "";
+    private volatile String role = "Guest";
 
     public Connection(String host, int port) {
         this.host = host;
         this.port = port;
     }
 
+    public void setConnectionInfo(String host, int port) {
+        this.host = host;
+        this.port = port;
+    }
+
+    public String getHost() {
+        return host;
+    }
+
+    public int getPort() {
+        return port;
+    }
+
     public void start() {
         executor.submit(this::connectionLoop);
         executor.submit(this::receiveLoop);
+    }
+
+    public String getRole() {
+        return role;
+    }
+
+    public void setRole(String role) {
+        this.role = role;
     }
 
     private void connectionLoop() {
@@ -113,10 +135,16 @@ public class Connection {
                 clientId = Integer.parseInt(id);
                 authenticated = true;
                 responseQueue.offer("AUTH_SUCCESS:" + clientId);
+                // Try to infer role if it's there? Usually server sends ROLE: after auth
                 return;
             } catch (NumberFormatException e) {
                 // Fall through to default handling
             }
+        }
+
+        if (response.startsWith("ROLE:")) {
+            this.role = response.substring(5).trim();
+            return;
         }
 
         if (response.equals("=== Distributed File System ===") || 

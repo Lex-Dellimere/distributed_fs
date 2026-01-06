@@ -1,47 +1,57 @@
 package org.example.server;
 
 import org.example.client.ClientManager;
+import org.example.config.ServerConfig;
+import org.example.db.DatabaseManager;
 import org.example.vfs.VirtualFileSystem;
 
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.sql.SQLException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class DFSServer {
-    private final int port;
+    private final ServerConfig config;
     private final ExecutorService threadPool;
     private final ClientManager clientManager;
     private final VirtualFileSystem vfs;
+    private final DatabaseManager dbManager;
 
-    public DFSServer(int port) throws IOException {
-        this.port = port;
+    public DFSServer(ServerConfig config) throws IOException, SQLException {
+        this.config = config;
         this.threadPool = Executors.newCachedThreadPool();
         this.clientManager = new ClientManager();
-        this.vfs = new VirtualFileSystem("dfs_root");
+        this.vfs = new VirtualFileSystem(config.getResourcesPath());
+        this.dbManager = new DatabaseManager(config);
+        this.dbManager.initialize();
     }
 
     public static void main(String[] args) {
         try {
-            int port = args.length > 0 ? Integer.parseInt(args[0]) : 5555;
-            DFSServer server = new DFSServer(port);
+            ServerConfig config = ServerConfig.load();
+            if (args.length > 0) {
+                config.setPort(Integer.parseInt(args[0]));
+            }
+            DFSServer server = new DFSServer(config);
             server.start();
         } catch (NumberFormatException e) {
             System.err.println("Invalid port number");
             System.exit(1);
-        } catch (IOException e) {
+        } catch (IOException | SQLException e) {
             System.err.println("Failed to start server: " + e.getMessage());
+            e.printStackTrace();
             System.exit(1);
         }
     }
 
     public void start() {
 
-        System.out.println("Starting Distributed File System Server on port " + port);
-        System.out.println("Virtual File System root: dfs_root");
+        System.out.println("Starting Distributed File System Server on port " + config.getPort());
+        System.out.println("Virtual File System root: " + config.getResourcesPath());
 
-        try (ServerSocket serverSocket = new ServerSocket(port)) {
+        try (ServerSocket serverSocket = new ServerSocket(config.getPort())) {
             System.out.println("Server ready. Waiting for connections...");
 
             while (!Thread.currentThread().isInterrupted()) {
@@ -50,7 +60,7 @@ public class DFSServer {
                 System.out.println("New connection from: " + clientSocket.getInetAddress());
 
                 ClientSessionHandler handler = new ClientSessionHandler(
-                        clientSocket, clientManager, vfs
+                        clientSocket, clientManager, vfs, dbManager
                 );
 
                 threadPool.execute(handler);

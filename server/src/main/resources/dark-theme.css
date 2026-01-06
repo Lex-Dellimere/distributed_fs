@@ -1,0 +1,60 @@
+root {
+    -fx-base: #2b2b2b;
+}
+
+.root {
+    -fx-background-color: #1e1e1e;
+    -fx-font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    -fx-text-fill: #e6e6e6;
+}
+
+.label, .check-box, .list-cell, .text-field, .password-field, .text-area {
+    -fx-text-fill: #ffffff !important;
+}
+
+.button {
+    -fx-background-color: linear-gradient(#3a3a3a, #2b2b2b);
+    -fx-text-fill: #ffffff;
+    -fx-border-color: #444444;
+}
+
+.text-field, .password-field, .text-area, .list-view {
+    -fx-background-color: #262626;
+    -fx-text-fill: #ffffff !important;
+    -fx-border-color: #3a3a3a;
+}
+
+/* Make checkbox text readable */
+.check-box, .list-cell {
+    -fx-text-fill: #ffffff !important;
+}
+
+.check-box .text, .check-box .label {
+    -fx-fill: #ffffff !important;
+    -fx-text-fill: #ffffff !important;
+}
+
+/* role editor area background so inputs contrast */
+.vbox {
+    -fx-background-color: #262626;
+    -fx-padding: 8;
+    -fx-border-color: #333333;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+}
+
+.tab-pane .tab-header-background {
+    -fx-background-color: #141414;
+}
+
+.tab-pane .tab {
+    -fx-background-color: transparent;
+    -fx-text-base-color: #e6e6e6;
+}
+
+.log-area {
+    -fx-control-inner-background: #0f0f0f;
+    -fx-font-family: "Monospaced";
+    -fx-font-size: 12px;
+    -fx-text-fill: #cfcfcf;
+}

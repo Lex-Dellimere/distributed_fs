@@ -1,0 +1,58 @@
+.root {
+    -fx-base: #1e1e1e;
+    -fx-control-inner-background: #2d2d2d;
+    -fx-accent: #0078d7;
+    -fx-focus-color: #0078d7;
+}
+
+.label {
+    -fx-text-fill: #e1e1e1;
+    -fx-font-size: 14px;
+}
+
+.text-field, .text-area, .combo-box {
+    -fx-background-color: #333333;
+    -fx-text-fill: #e1e1e1;
+    -fx-prompt-text-fill: #888888;
+    -fx-highlight-fill: #0078d7;
+    -fx-highlight-text-fill: white;
+    -fx-font-size: 18px;
+}
+
+.text-area {
+    -fx-font-family: "Consolas", "Monospaced", monospace;
+    -fx-font-size: 18px;
+}
+
+.button {
+    -fx-background-color: #444444;
+    -fx-text-fill: white;
+    -fx-border-color: #555555;
+    -fx-font-size: 16px;
+    -fx-font-weight: bold;
+}
+
+.button:hover {
+    -fx-background-color: #555555;
+}
+
+.button:pressed {
+    -fx-background-color: #666666;
+}
+
+.list-view {
+    -fx-background-color: #2d2d2d;
+}
+
+.list-cell {
+    -fx-text-fill: #e1e1e1;
+}
+
+.list-cell:filled:selected {
+    -fx-background-color: #0078d7;
+}
+
+.combo-box .list-cell {
+    -fx-background-color: #333333;
+    -fx-text-fill: #e1e1e1;
+}

@@ -11,12 +11,24 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.example.vfs.FileEntry;
+import org.example.vfs.EntryType;
 
+/**
+ * Virtual file system for the distributed server.
+ * Uses modern Java features and best practices.
+ */
 public class VirtualFileSystem {
     private final Path serverRoot;
     private final Map<String, FileEntry> fileTable;
     private final Map<Integer, List<String>> clientFiles;
 
+    /**
+     * Constructs a VirtualFileSystem with the specified root path.
+     *
+     * @param rootPath the root path for the virtual file system
+     * @throws IOException if an I/O error occurs
+     */
     public VirtualFileSystem(String rootPath) throws IOException {
         this.serverRoot = Paths.get(rootPath).toAbsolutePath();
         this.fileTable = new ConcurrentHashMap<>();
@@ -35,6 +47,11 @@ public class VirtualFileSystem {
         loadExistingFiles();
     }
 
+    /**
+     * Loads existing files from the server metadata and file system.
+     *
+     * @throws IOException if an I/O error occurs
+     */
     public void loadExistingFiles() throws IOException {
         Path metadataPath = serverRoot.resolve("server_metadata.json");
         fileTable.clear();
@@ -68,10 +85,10 @@ public class VirtualFileSystem {
                             }
                         }
 
-                        FileEntry entry = new FileEntry(path, size, owner, ownerId, new Date(), type);
+                        FileEntry entry = new FileEntry(path, size, owner, ownerId, new Date(), EntryType.valueOf(type.toUpperCase()));
                         fileTable.put(path, entry);
                         if (ownerId > 0) {
-                            clientFiles.computeIfAbsent(ownerId, k -> new ArrayList<>()).add(path);
+                            clientFiles.computeIfAbsent(ownerId, unused -> new ArrayList<>()).add(path);
                         }
                     } catch (Exception e) {
                         System.err.println("Error parsing metadata line: " + line);
@@ -102,10 +119,9 @@ public class VirtualFileSystem {
     private synchronized void saveMetadata() {
         Path metadataPath = serverRoot.resolve("server_metadata.json");
         StringBuilder sb = new StringBuilder("{\n");
-        fileTable.forEach((path, entry) -> {
-            sb.append(String.format("  \"%s\": {\"createdBy\":\"AUTH:%s\",\"clientId\":%d,\"createdAt\":\"%s\",\"size\":%d,\"type\":\"%s\"},\n",
-                    path, entry.getOwner(), entry.getOwnerId(), entry.getCreatedAt(), entry.getSize(), entry.getType()));
-        });
+        // Replace statement lambda with expression lambda for fileTable.forEach
+        fileTable.forEach((path, entry) -> sb.append(String.format("  \"%s\": {\"createdBy\":\"AUTH:%s\",\"clientId\":%d,\"createdAt\":\"%s\",\"size\":%d,\"type\":\"%s\"},\n",
+                path, entry.owner(), entry.ownerId(), entry.createdAt(), entry.size(), entry.type())));
         if (sb.length() > 2) {
             sb.setLength(sb.length() - 2);
             sb.append("\n");
@@ -118,6 +134,17 @@ public class VirtualFileSystem {
         }
     }
 
+    /**
+     * Creates a new file or directory in the virtual file system.
+     *
+     * @param path    the path of the file or directory to create
+     * @param data    the data for the file, or null for a directory
+     * @param owner   the owner of the file
+     * @param clientId the client ID associated with the file
+     * @param type    the type of the entry ("file" or "directory")
+     * @return the created FileEntry
+     * @throws IOException if an I/O error occurs
+     */
     public FileEntry createFile(String path, byte[] data, String owner, int clientId, String type) throws IOException {
         Path fullPath = serverRoot.resolve(path).normalize();
 
@@ -134,38 +161,54 @@ public class VirtualFileSystem {
         } else if (type.equals("directory")) {
             Files.createDirectories(fullPath);
         }
-
-
         FileEntry entry = new FileEntry(
                 path,
                 data != null ? data.length : 0,
                 owner,
                 clientId,
                 new Date(),
-                type
+                type.equals("directory") ? EntryType.DIRECTORY : EntryType.FILE
         );
 
         fileTable.put(path, entry);
 
 
-        clientFiles.computeIfAbsent(clientId, k -> new ArrayList<>()).add(path);
+        // Replace statement lambda with expression lambda for clientFiles.computeIfAbsent
+        clientFiles.computeIfAbsent(clientId, unused -> new ArrayList<>()).add(path);
 
         saveMetadata();
 
         return entry;
     }
 
+    /**
+     * Creates a new file in the virtual file system.
+     *
+     * @param path    the path of the file to create
+     * @param data    the data for the file
+     * @param owner   the owner of the file
+     * @param clientId the client ID associated with the file
+     * @return the created FileEntry
+     * @throws IOException if an I/O error occurs
+     */
     public FileEntry createFile(String path, byte[] data, String owner, int clientId) throws IOException {
         return createFile(path, data, owner, clientId, "file");
     }
 
+    /**
+     * Reads the contents of a file.
+     *
+     * @param path the path of the file to read
+     * @return the file data as a byte array
+     * @throws IOException if an I/O error occurs
+     */
     public byte[] readFile(String path) throws IOException {
         FileEntry entry = fileTable.get(path);
         if (entry == null) {
             throw new FileNotFoundException("File not found: " + path);
         }
 
-        if (entry.getType().equals("directory")) {
+        if (entry.type() == EntryType.DIRECTORY) {
             throw new IOException("Cannot read a directory: " + path);
         }
 
@@ -173,6 +216,14 @@ public class VirtualFileSystem {
         return Files.readAllBytes(fullPath);
     }
 
+    /**
+     * Deletes a file or directory from the virtual file system.
+     *
+     * @param path    the path of the file or directory to delete
+     * @param clientId the client ID attempting the deletion
+     * @return true if the file or directory was deleted, false if not found
+     * @throws IOException if an I/O error occurs
+     */
     public boolean deleteFile(String path, int clientId) throws IOException {
         FileEntry entry = fileTable.get(path);
         if (entry == null) {
@@ -180,13 +231,14 @@ public class VirtualFileSystem {
         }
 
 
-        if (entry.getOwnerId() != clientId && !entry.getOwner().equals("admin")) {
+        if (entry.ownerId() != clientId && !entry.owner().equals("admin")) {
             throw new SecurityException("Permission denied");
         }
 
         Path fullPath = serverRoot.resolve(path);
-        if (entry.getType().equals("directory")) {
+        if (entry.type() == EntryType.DIRECTORY) {
 
+            // Replace statement lambda with expression lambda for fileTable.keySet().stream().anyMatch
             boolean hasChildren = fileTable.keySet().stream()
                     .anyMatch(p -> p.startsWith(path + "/") && !p.equals(path));
             if (hasChildren) {
@@ -210,6 +262,12 @@ public class VirtualFileSystem {
         return true;
     }
 
+    /**
+     * Lists files in a directory.
+     *
+     * @param directory the directory to list files from
+     * @return a list of FileEntry objects representing the files in the directory
+     */
     public List<FileEntry> listFiles(String directory) {
         List<FileEntry> result = new ArrayList<>();
 
@@ -223,6 +281,12 @@ public class VirtualFileSystem {
         return result;
     }
 
+    /**
+     * Retrieves files associated with a specific client.
+     *
+     * @param clientId the client ID
+     * @return a list of FileEntry objects associated with the client
+     */
     public List<FileEntry> getClientFiles(int clientId) {
         List<FileEntry> result = new ArrayList<>();
         List<String> filePaths = clientFiles.get(clientId);
@@ -237,66 +301,5 @@ public class VirtualFileSystem {
         }
 
         return result;
-    }
-
-    public static class FileEntry {
-        private final String path;
-        private final long size;
-        private final String owner;
-        private final int ownerId;
-        private final Date createdAt;
-        private final String type;
-
-        public FileEntry(String path, long size, String owner, int ownerId, Date createdAt, String type) {
-            this.path = path;
-            this.size = size;
-            this.owner = owner;
-            this.ownerId = ownerId;
-            this.createdAt = createdAt;
-            this.type = type;
-        }
-
-        public static FileEntry fromPath(Path path) throws IOException {
-            return new FileEntry(
-                    path.toString(),
-                    Files.size(path),
-                    "system",
-                    0,
-                    Files.getLastModifiedTime(path).toInstant().toEpochMilli() > 0 ?
-                            new Date(Files.getLastModifiedTime(path).toMillis()) : new Date(),
-                    Files.isDirectory(path) ? "directory" : "file"
-            );
-        }
-
-
-        public String getPath() {
-            return path;
-        }
-
-        public long getSize() {
-            return size;
-        }
-
-        public String getOwner() {
-            return owner;
-        }
-
-        public int getOwnerId() {
-            return ownerId;
-        }
-
-        public Date getCreatedAt() {
-            return createdAt;
-        }
-
-        public String getType() {
-            return type;
-        }
-
-        @Override
-        public String toString() {
-            return String.format("%s [%s] %dB - %s (%s)",
-                    path, type, size, owner, createdAt);
-        }
     }
 }
