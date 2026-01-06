@@ -5,16 +5,13 @@ import tkinter as tk
 from tkinter import scrolledtext, ttk, messagebox
 import threading
 
-class ClientWindow(tk.Toplevel):
-    def __init__(self, master, client_id):
+class ClientFrame(ttk.Frame):
+    def __init__(self, master, client_id, on_close_callback):
         super().__init__(master)
-        self.title(f"DFS Client {client_id}")
-        self.geometry("600x450")
         self.client_id = client_id
+        self.on_close_callback = on_close_callback
         self.process = None
         self.setup_ui()
-        self.master.master.app.center_window(self) if hasattr(self.master.master, 'app') else None
-        self.protocol("WM_DELETE_WINDOW", self.stop_client)
         self.start_client_process()
 
     def stop_client(self):
@@ -25,8 +22,7 @@ class ClientWindow(tk.Toplevel):
             except subprocess.TimeoutExpired:
                 self.process.kill()
             self.process = None
-        if self.winfo_exists():
-            self.destroy()
+        self.on_close_callback(self)
 
     def setup_ui(self):
         self.terminal = scrolledtext.ScrolledText(self, state=tk.DISABLED, bg="#1e1e1e", fg="#00ff00", insertbackground="white", font=("Consolas", 10))
@@ -42,10 +38,17 @@ class ClientWindow(tk.Toplevel):
         self.entry.bind("<Return>", self.handle_input)
         self.entry.focus_set()
 
-        self.send_btn = ttk.Button(input_frame, text="Send", command=lambda: self.handle_input(None))
+        btn_frame = ttk.Frame(input_frame)
+        btn_frame.pack(side=tk.LEFT)
+
+        self.send_btn = ttk.Button(btn_frame, text="Send", command=lambda: self.handle_input(None))
         self.send_btn.pack(side=tk.LEFT)
 
+        self.close_btn = ttk.Button(btn_frame, text="Close", command=self.stop_client)
+        self.close_btn.pack(side=tk.LEFT, padx=5)
+
     def log(self, message):
+        if not self.winfo_exists(): return
         self.terminal.configure(state=tk.NORMAL)
         self.terminal.insert(tk.END, message + "\n")
         self.terminal.see(tk.END)
@@ -82,25 +85,25 @@ class ClientWindow(tk.Toplevel):
             char = self.process.stdout.read(1)
             if not char:
                 break
-            self.after(0, self.append_text, char)
-        self.after(0, self.log, "Client disconnected.")
+            if self.winfo_exists():
+                self.after(0, self.append_text, char)
+        if self.winfo_exists():
+            self.after(0, self.log, "Client disconnected.")
         self.process = None
 
     def append_text(self, text):
+        if not self.winfo_exists(): return
         self.terminal.configure(state=tk.NORMAL)
         self.terminal.insert(tk.END, text)
         self.terminal.see(tk.END)
         self.terminal.configure(state=tk.DISABLED)
 
-class ServerWindow(tk.Toplevel):
-    def __init__(self, master):
+class ServerFrame(ttk.Frame):
+    def __init__(self, master, on_close_callback):
         super().__init__(master)
-        self.title("DFS Server Console")
-        self.geometry("700x500")
+        self.on_close_callback = on_close_callback
         self.process = None
         self.setup_ui()
-        self.master.master.app.center_window(self) if hasattr(self.master.master, 'app') else None
-        self.protocol("WM_DELETE_WINDOW", self.stop_server)
         self.start_server_process()
 
     def setup_ui(self):
@@ -110,10 +113,11 @@ class ServerWindow(tk.Toplevel):
         btn_frame = ttk.Frame(self, padding="5")
         btn_frame.pack(fill=tk.X)
 
-        self.stop_btn = ttk.Button(btn_frame, text="Stop Server", command=self.stop_server)
+        self.stop_btn = ttk.Button(btn_frame, text="Stop Server & Close Tab", command=self.stop_server)
         self.stop_btn.pack(side=tk.RIGHT)
 
     def log(self, message):
+        if not self.winfo_exists(): return
         self.log_area.configure(state=tk.NORMAL)
         self.log_area.insert(tk.END, message + "\n")
         self.log_area.see(tk.END)
@@ -137,11 +141,14 @@ class ServerWindow(tk.Toplevel):
             char = self.process.stdout.read(1)
             if not char:
                 break
-            self.after(0, self.append_text, char)
-        self.after(0, self.log, "Server stopped.")
+            if self.winfo_exists():
+                self.after(0, self.append_text, char)
+        if self.winfo_exists():
+            self.after(0, self.log, "Server stopped.")
         self.process = None
 
     def append_text(self, text):
+        if not self.winfo_exists(): return
         self.log_area.configure(state=tk.NORMAL)
         self.log_area.insert(tk.END, text)
         self.log_area.see(tk.END)
@@ -155,29 +162,27 @@ class ServerWindow(tk.Toplevel):
             except subprocess.TimeoutExpired:
                 self.process.kill()
             self.process = None
-        if self.winfo_exists():
-            self.destroy()
+        self.on_close_callback()
 
 class MainApp:
     def __init__(self, root):
         self.root = root
         self.root.title("DFS Management Control")
-        self.root.geometry("450x250")
+        self.root.geometry("800x600")
         self.center_window(self.root)
 
-        self.server_window = None
-        self.client_windows = []
+        self.server_frame = None
+        self.client_frames = {}
         self.client_counter = 0
 
         self.setup_ui()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def on_close(self):
-        if self.server_window and self.server_window.winfo_exists():
-            self.server_window.stop_server()
-        for client in self.client_windows:
-            if client.winfo_exists():
-                client.stop_client()
+        if self.server_frame:
+            self.server_frame.stop_server()
+        for client in list(self.client_frames.values()):
+            client.stop_client()
         self.root.destroy()
 
     def center_window(self, window):
@@ -192,22 +197,28 @@ class MainApp:
         style = ttk.Style()
         style.configure("TButton", padding=6, font=("Segoe UI", 10))
 
-        main_frame = ttk.Frame(self.root, padding="20")
-        main_frame.pack(expand=True, fill=tk.BOTH)
+        # Main horizontal paned window or just a vertical layout
+        self.main_container = ttk.Frame(self.root)
+        self.main_container.pack(expand=True, fill=tk.BOTH)
 
-        ttk.Label(main_frame, text="Distributed File System", font=("Segoe UI", 14, "bold")).pack(pady=10)
+        # Top control bar
+        control_frame = ttk.Frame(self.main_container, padding="10")
+        control_frame.pack(side=tk.TOP, fill=tk.X)
 
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(pady=10)
+        ttk.Label(control_frame, text="DFS Management", font=("Segoe UI", 12, "bold")).pack(side=tk.LEFT, padx=10)
 
-        self.start_server_btn = ttk.Button(btn_frame, text="Launch Server", command=self.launch_server)
+        self.start_server_btn = ttk.Button(control_frame, text="Launch Server", command=self.launch_server)
         self.start_server_btn.pack(side=tk.LEFT, padx=5)
 
-        self.new_client_btn = ttk.Button(btn_frame, text="New Client", command=self.launch_client)
+        self.new_client_btn = ttk.Button(control_frame, text="New Client", command=self.launch_client)
         self.new_client_btn.pack(side=tk.LEFT, padx=5)
 
-        self.cleanup_btn = ttk.Button(btn_frame, text="Cleanup", command=self.run_cleanup)
+        self.cleanup_btn = ttk.Button(control_frame, text="Cleanup", command=self.run_cleanup)
         self.cleanup_btn.pack(side=tk.LEFT, padx=5)
+
+        # Notebook for sub-pages
+        self.notebook = ttk.Notebook(self.main_container)
+        self.notebook.pack(expand=True, fill=tk.BOTH, padx=5, pady=5)
 
     def run_cleanup(self):
         if messagebox.askyesno("Cleanup", "This will delete build artifacts and server data. Are you sure?"):
@@ -218,15 +229,31 @@ class MainApp:
                 messagebox.showerror("Error", f"Cleanup failed: {e}")
 
     def launch_server(self):
-        if self.server_window is None or not self.server_window.winfo_exists():
-            self.server_window = ServerWindow(self.root)
-        else:
-            self.server_window.lift()
+        if self.server_frame is None:
+            self.server_frame = ServerFrame(self.notebook, self.on_server_close)
+            self.notebook.add(self.server_frame, text="Server Console")
+        self.notebook.select(self.server_frame)
+
+    def on_server_close(self):
+        if self.server_frame:
+            self.notebook.forget(self.server_frame)
+            self.server_frame.destroy()
+            self.server_frame = None
 
     def launch_client(self):
         self.client_counter += 1
-        client = ClientWindow(self.root, self.client_counter)
-        self.client_windows.append(client)
+        client_id = self.client_counter
+        client_frame = ClientFrame(self.notebook, client_id, self.on_client_close)
+        self.client_frames[client_id] = client_frame
+        self.notebook.add(client_frame, text=f"Client {client_id}")
+        self.notebook.select(client_frame)
+
+    def on_client_close(self, client_frame):
+        client_id = client_frame.client_id
+        if client_id in self.client_frames:
+            self.notebook.forget(client_frame)
+            client_frame.destroy()
+            del self.client_frames[client_id]
 
 if __name__ == "__main__":
     # Check if we should try to detach from the console on Windows

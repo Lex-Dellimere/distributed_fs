@@ -49,11 +49,7 @@ public class REPL {
     }
 
     private void showPrompt() {
-        if (connection.isAuthenticated()) {
-            System.out.print(connection.getUsername() + "#" + connection.getClientId() + "> ");
-        } else {
-            System.out.print("NOT_AUTH> ");
-        }
+        // No prompt for GUI
         System.out.flush();
     }
 
@@ -120,8 +116,11 @@ public class REPL {
                 return;
 
             default:
-
-                handleGenericCommand(line);
+                if (command.startsWith("server ")) {
+                    handleGenericCommand(line.substring(7).trim());
+                } else {
+                    handleGenericCommand(line);
+                }
         }
     }
 

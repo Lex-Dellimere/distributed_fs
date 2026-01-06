@@ -107,6 +107,23 @@ public class Connection {
     private void handleResponse(String response) {
         if (response == null) return;
 
+        if (response.startsWith("SUCCESS: Authenticated as client #")) {
+            try {
+                String id = response.substring(response.indexOf("#") + 1).trim();
+                clientId = Integer.parseInt(id);
+                authenticated = true;
+                responseQueue.offer("AUTH_SUCCESS:" + clientId);
+                return;
+            } catch (NumberFormatException e) {
+                // Fall through to default handling
+            }
+        }
+
+        if (response.equals("=== Distributed File System ===") || 
+            response.equals("Please authenticate (username,password):") ||
+            response.equals("Type 'help' for available commands")) {
+            return;
+        }
 
         if (response.startsWith("CLIENT_ID:")) {
             try {
@@ -168,6 +185,8 @@ public class Connection {
     public void authenticate(String username, String password) throws IOException, InterruptedException {
         if (!isConnected()) throw new IOException("Not connected");
 
+        // Clear the response queue of any previous messages (like greetings)
+        responseQueue.clear();
 
         sendCommand(username + "," + password);
         this.username = username;
@@ -204,31 +223,24 @@ public class Connection {
             sendCommand(command);
         }
 
-
+        StringBuilder fullResponse = new StringBuilder();
         long endTime = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < endTime) {
             String response = responseQueue.poll(100, TimeUnit.MILLISECONDS);
             if (response != null) {
-                if (response.startsWith("ERROR:") ||
-                        response.startsWith("SUCCESS:") ||
-                        response.startsWith("READY:") ||
-                        response.startsWith("FILE_DATA:") ||
-                        response.startsWith("Files in") ||
-                        response.startsWith("Current directory:") ||
-                        response.startsWith("You are client #") ||
-                        response.startsWith("Available Commands:") ||
-                        response.startsWith("You don't have any files.") ||
-                        response.startsWith("Your files:") ||
-                        response.startsWith("No files found in")) {
-                    return response;
+                if (response.equals("CMD_END")) {
+                    return fullResponse.length() > 0 ? fullResponse.toString().trim() : "";
                 }
-
-                if (!response.equals("DISCONNECT")) {
-                    return response;
+                if (response.equals("DISCONNECT")) {
+                    return fullResponse.length() > 0 ? fullResponse.toString().trim() : null;
                 }
+                if (fullResponse.length() > 0) {
+                    fullResponse.append("\n");
+                }
+                fullResponse.append(response);
             }
         }
-        return null;
+        return fullResponse.length() > 0 ? fullResponse.toString().trim() : null;
     }
 
     public boolean isConnected() {

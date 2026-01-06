@@ -87,6 +87,7 @@ public class ClientSessionHandler implements Runnable {
         while ((command = input.readLine()) != null) {
             String response = executeCommand(command.trim());
             output.println(response);
+            output.println("CMD_END");
 
             if (command.equalsIgnoreCase("quit") || command.equalsIgnoreCase("exit")) {
                 break;
