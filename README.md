@@ -1,5 +1,7 @@
 # Distributed File System (DFS) - Python Scripts
 
+<img width="2058" height="530" alt="DFS" src="https://github.com/user-attachments/assets/e9bc1038-e124-4cd3-81cc-203df6e6b45f" />
+
 A lightweight Distributed File System (DFS) implementation featuring a Java-based backend and a Python/Tkinter management console. This system allows for basic file operations (upload, download, list, delete) across a network using a client-server architecture.
 
 ### Features
