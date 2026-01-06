@@ -14,10 +14,9 @@ import java.io.PrintWriter;
 import java.net.Socket;
 import java.nio.file.Paths;
 import java.sql.SQLException;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
-import java.util.stream.Collectors;
-import java.util.Arrays;
 
 /**
  * Handles a client session for the distributed file system server.
@@ -34,7 +33,7 @@ public class ClientSessionHandler implements Runnable {
     private PrintWriter output;
 
     // Constants for error messages
-    private static final String ERR_INVALID_FORMAT = "ERROR: Invalid format. Use: login <user>,<pass>, signup <user>,<pass> OR guest";
+    private static final String ERR_INVALID_FORMAT = "ERROR: Invalid format. Use: login <user> <pass>, signup <user> <pass> OR guest";
     private static final String ERR_UNKNOWN_CMD = "ERROR: Unknown command. Use login or signup.";
     private static final String ERR_DB = "ERROR: Database error: ";
     private static final String ERR_DUPLICATE_USER = "ERROR: Username already exists";
@@ -72,36 +71,36 @@ public class ClientSessionHandler implements Runnable {
 
     private boolean authenticate() throws IOException {
         output.println("=== Distributed File System ===");
-        output.println("Available: login <user>,<pass> OR signup <user>,<pass> OR guest");
+        output.println("Available: login <user> <pass> OR signup <user> <pass> OR guest");
         while (true) {
             String line = input.readLine();
             if (line == null) return false;
             String trimmedLine = line.trim();
+            if (trimmedLine.isEmpty()) continue;
+            
             if (trimmedLine.equalsIgnoreCase("guest")) {
                 clientInfo = clientManager.registerClient("guest_" + (int)(Math.random() * 10000), "guest");
                 output.println(SUCCESS_GUEST);
                 output.println(HELP_PROMPT);
                 return true;
             }
-            String[] parts = trimmedLine.split("\\s+", 2);
-            if (parts.length < 2) {
+            
+            String[] parts = trimmedLine.split("\\s+", 3);
+            if (parts.length < 3) {
                 output.println(ERR_INVALID_FORMAT);
                 continue;
             }
+            
             String cmd = parts[0].toLowerCase();
-            String[] credentials = parts[1].split(",", 2);
-            if (credentials.length != 2) {
-                output.println(ERR_INVALID_FORMAT);
-                continue;
-            }
-            String username = credentials[0].trim();
-            String password = credentials[1].trim();
+            String username = parts[1].trim();
+            String password = parts[2].trim();
+            
             try {
                 if (cmd.equals("login")) {
-                    DatabaseManager.User user = dbManager.authenticate(username, password);
+                    User user = dbManager.authenticate(username, password);
                     if (user != null) {
-                        clientInfo = clientManager.registerClient(user.username, user.role);
-                        output.println(String.format(SUCCESS_LOGIN, user.username, user.role));
+                        clientInfo = clientManager.registerClient(user.username(), user.role());
+                        output.println(String.format(SUCCESS_LOGIN, user.username(), user.role()));
                         output.println(HELP_PROMPT);
                         return true;
                     } else {
@@ -110,6 +109,7 @@ public class ClientSessionHandler implements Runnable {
                 } else if (cmd.equals("signup")) {
                     if (dbManager.registerUser(username, password, "guest")) {
                         output.println(SUCCESS_REGISTER);
+                        return false;
                     } else {
                         output.println(ERR_DUPLICATE_USER);
                     }
@@ -177,7 +177,7 @@ public class ClientSessionHandler implements Runnable {
 
         // Permission check via DB
         try {
-            if (!dbManager.isCommandAllowed(clientInfo.role(), cmd)) {
+            if (dbManager.isCommandForbidden(clientInfo.role(), cmd)) {
                 return "ERROR: Permission denied. Your role does not allow this command.";
             }
         } catch (SQLException e) {
@@ -187,7 +187,7 @@ public class ClientSessionHandler implements Runnable {
         try {
             // Admin commands handled here
             if (List.of("listroles","createrole","deleterole","shutdown").contains(cmd)) {
-                if (!dbManager.isCommandAllowed(clientInfo.role(), cmd)) {
+                if (dbManager.isCommandForbidden(clientInfo.role(), cmd)) {
                     return "ERROR: Permission denied. Admin only.";
                 }
                 return executeAdminCommands(cmd, args);
@@ -226,7 +226,7 @@ public class ClientSessionHandler implements Runnable {
                     return getHelpText();
                 }
                 case "kick" -> {
-                    if (!dbManager.isCommandAllowed(clientInfo.role(), "kick")) {
+                    if (dbManager.isCommandForbidden(clientInfo.role(), "kick")) {
                         return "ERROR: Permission denied. Admin only.";
                     }
                     if (args.isEmpty()) return "ERROR: Usage: kick <client-id>";
@@ -239,7 +239,7 @@ public class ClientSessionHandler implements Runnable {
                     }
                 }
                 case "setrole" -> {
-                    if (!dbManager.isCommandAllowed(clientInfo.role(), "setrole")) {
+                    if (dbManager.isCommandForbidden(clientInfo.role(), "setrole")) {
                         return "ERROR: Permission denied. Admin only.";
                     }
                     String[] roleArgs = args.split("\\s+", 2);
@@ -304,16 +304,7 @@ public class ClientSessionHandler implements Runnable {
                 Paths.get(localPath).getFileName().toString();
 
 
-        if (!remotePath.startsWith("/")) {
-            String currentDir = clientInfo.currentDirectory();
-            if (!currentDir.endsWith("/")) currentDir += "/";
-            remotePath = currentDir + remotePath;
-        }
-
-
-        if (remotePath.startsWith("/")) {
-            remotePath = remotePath.substring(1);
-        }
+        remotePath = normalizePath(remotePath);
 
 
         output.println("READY: Send file data (base64 encoded). END with 'EOF' on a new line.");
@@ -350,16 +341,7 @@ public class ClientSessionHandler implements Runnable {
 
         String remotePath = args;
 
-        if (!remotePath.startsWith("/")) {
-            String currentDir = clientInfo.currentDirectory();
-            if (!currentDir.endsWith("/")) currentDir += "/";
-            remotePath = currentDir + remotePath;
-        }
-
-
-        if (remotePath.startsWith("/")) {
-            remotePath = remotePath.substring(1);
-        }
+        remotePath = normalizePath(remotePath);
 
         try {
             byte[] fileData = vfs.readFile(remotePath);
@@ -423,16 +405,7 @@ public class ClientSessionHandler implements Runnable {
 
         String remotePath = args;
 
-        if (!remotePath.startsWith("/")) {
-            String currentDir = clientInfo.currentDirectory();
-            if (!currentDir.endsWith("/")) currentDir += "/";
-            remotePath = currentDir + remotePath;
-        }
-
-
-        if (remotePath.startsWith("/")) {
-            remotePath = remotePath.substring(1);
-        }
+        remotePath = normalizePath(remotePath);
 
         try {
             boolean deleted = vfs.deleteFile(remotePath, clientInfo.clientId());
@@ -451,16 +424,7 @@ public class ClientSessionHandler implements Runnable {
 
         String remotePath = args;
 
-        if (!remotePath.startsWith("/")) {
-            String currentDir = clientInfo.currentDirectory();
-            if (!currentDir.endsWith("/")) currentDir += "/";
-            remotePath = currentDir + remotePath;
-        }
-
-
-        if (remotePath.startsWith("/")) {
-            remotePath = remotePath.substring(1);
-        }
+        remotePath = normalizePath(remotePath);
 
         try {
             FileEntry entry = vfs.createFile(
@@ -514,10 +478,29 @@ public class ClientSessionHandler implements Runnable {
             sb.append("  delete oldfile.txt\n");
 
         } catch (SQLException e) {
-            sb.append("ERROR: Unable to load help: " + e.getMessage());
+            sb.append("ERROR: Unable to load help: ").append(e.getMessage());
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Normalizes a remote path relative to current directory.
+     * @param remotePath the path to normalize
+     * @return normalized absolute path without leading slash
+     */
+    private String normalizePath(String remotePath) {
+        if (!remotePath.startsWith("/")) {
+            String currentDir = clientInfo.currentDirectory();
+            if (!currentDir.endsWith("/")) currentDir += "/";
+            remotePath = currentDir + remotePath;
+        }
+
+        if (remotePath.startsWith("/")) {
+            remotePath = remotePath.substring(1);
+        }
+
+        return remotePath;
     }
 
     private void cleanup() {
@@ -530,7 +513,8 @@ public class ClientSessionHandler implements Runnable {
             if (output != null) output.close();
             if (clientSocket != null) clientSocket.close();
         } catch (IOException e) {
-            System.err.println("Error during cleanup: " + e.getMessage());
+            System.err.print("Error during cleanup: ");
+            System.err.println(e.getMessage());
         }
     }
 }

@@ -40,6 +40,8 @@ import java.lang.management.ThreadMXBean;
 import java.lang.management.OperatingSystemMXBean;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 
 /**
  * Main application for managing FreeSRS server and users.
@@ -53,20 +55,29 @@ public class FreeSRSManager extends Application {
     private Label serverStatusLabel;
     private Process serverProcess;
     private TextArea serverLog;
+    private TextArea connectionLog;
     private final ExecutorService exec = Executors.newCachedThreadPool();
     private final Set<String> BUILTIN_ROLES = Set.of("admin", "guest");
     private StackPane rootStack;
     private VBox errorBubbleBox;
     private Timer healthTimer;
-    private final XYChart.Series<Number, Number> cpuSeries = new XYChart.Series<>();
-    private final XYChart.Series<Number, Number> memSeries = new XYChart.Series<>();
-    private final XYChart.Series<Number, Number> threadSeries = new XYChart.Series<>();
+    private Timer connectionLogTimer;
     private long healthStartTime = System.currentTimeMillis();
+    private static final String HEALTH_HISTORY_FILE = "health_history.json";
+    private static final int MAX_HISTORY_POINTS = 43200; // 24 hours at 2s intervals
 
     // Health data storage for history
-    private final Map<String, List<XYChart.Data<Number, Number>>> healthHistory = new HashMap<>();
+    private final Map<String, List<HealthDataPoint>> healthHistory = new HashMap<>();
     private String currentMetric = "CPU %";
     private String currentRange = "Day";
+    private Label connLabel, memLabel, sysMemLabel, cpuLabel, threadLabel, dbLabel, uptimeLabel;
+    private LineChart<Number, Number> healthChart;
+
+    static class HealthDataPoint {
+        long time;
+        double value;
+        HealthDataPoint(long t, double v) { time = t; value = v; }
+    }
 
     @Override
     public void start(Stage primaryStage) {
@@ -87,6 +98,7 @@ public class FreeSRSManager extends Application {
         tabPane.getTabs().add(createUsersTab());
         tabPane.getTabs().add(createRolesTab());
         tabPane.getTabs().add(createHealthTab());
+        tabPane.getTabs().add(createConnectionLogsTab());
 
         BorderPane root = new BorderPane();
         root.setCenter(tabPane);
@@ -112,6 +124,8 @@ public class FreeSRSManager extends Application {
         primaryStage.show();
 
         primaryStage.setOnCloseRequest(e -> {
+            saveHealthHistory();
+            stopHealthMonitor();
             if (serverProcess != null && serverProcess.isAlive()) {
                 serverProcess.destroyForcibly();
             }
@@ -120,12 +134,25 @@ public class FreeSRSManager extends Application {
             System.exit(0);
         });
 
+        loadHealthHistory();
         startHealthMonitor();
     }
 
     private void showErrorBubble(String msg) {
+        showBubble(msg, "#ff4444");
+    }
+
+    private void showSuccessBubble(String msg) {
+        showBubble(msg, "#44ff44");
+    }
+
+    private void showInfoBubble(String msg) {
+        showBubble(msg, "#4488ff");
+    }
+
+    private void showBubble(String msg, String color) {
         Label bubble = new Label(msg);
-        bubble.setStyle("-fx-background-color: #ff4444; -fx-text-fill: white; -fx-padding: 12 24; -fx-font-size: 15px; -fx-background-radius: 16; -fx-effect: dropshadow(gaussian, #222, 8, 0.5, 0, 2);");
+        bubble.setStyle("-fx-background-color: " + color + "; -fx-text-fill: white; -fx-padding: 12 24; -fx-font-size: 15px; -fx-background-radius: 16; -fx-effect: dropshadow(gaussian, #222, 8, 0.5, 0, 2);");
         bubble.setOpacity(0);
         errorBubbleBox.getChildren().add(bubble);
         FadeTransition fadeIn = new FadeTransition(Duration.millis(350), bubble);
@@ -176,6 +203,36 @@ public class FreeSRSManager extends Application {
 
         Button saveBtn = new Button("Save Configuration");
         saveBtn.setOnAction(e -> {
+            // Validate port
+            try {
+                int port = Integer.parseInt(portField.getText());
+                if (port < 1024 || port > 65535) {
+                    showErrorBubble("Port must be between 1024 and 65535");
+                    return;
+                }
+            } catch (NumberFormatException ex) {
+                showErrorBubble("Invalid port number");
+                return;
+            }
+
+            // Validate path
+            if (pathField.getText().trim().isEmpty()) {
+                showErrorBubble("Server root path cannot be empty");
+                return;
+            }
+
+            // Validate username if provided
+            if (!adminUserField.getText().isEmpty() && adminUserField.getText().length() < 3) {
+                showErrorBubble("Username must be at least 3 characters");
+                return;
+            }
+
+            // Validate password if provided
+            if (!adminPassField.getText().isEmpty() && adminPassField.getText().length() < 3) {
+                showErrorBubble("Password must be at least 3 characters");
+                return;
+            }
+
             try {
                 config.setPort(Integer.parseInt(portField.getText()));
                 config.setResourcesPath(pathField.getText());
@@ -191,6 +248,7 @@ public class FreeSRSManager extends Application {
                 dbManager.initialize();
                 sqlitePathLabel.setText(config.getDb() == null ? "(not initialized)" : config.getDb().sqlitePath());
                 refreshUserList();
+                showSuccessBubble("Configuration saved successfully");
             } catch (Exception ex) {
                 showErrorBubble("Error saving config: " + ex.getMessage());
             }
@@ -406,27 +464,32 @@ public class FreeSRSManager extends Application {
         VBox vbox = new VBox(12);
         vbox.setPadding(new Insets(20));
         vbox.setAlignment(javafx.geometry.Pos.TOP_LEFT);
-        Label connLabel = new Label("Active Connections: 0");
-        Label memLabel = new Label("Memory Used: 0 MB");
-        Label cpuLabel = new Label("CPU Load: 0%");
-        Label threadLabel = new Label("Active Threads: 0");
-        Label dbLabel = new Label("DB Size: 0 MB");
+        connLabel = new Label("Active Connections: 0");
+        memLabel = new Label("JVM Memory: 0 MB");
+        sysMemLabel = new Label("System Memory: 0 MB / 0 MB");
+        cpuLabel = new Label("CPU Load: 0%");
+        threadLabel = new Label("Active Threads: 0");
+        dbLabel = new Label("DB Size: 0 MB");
+        uptimeLabel = new Label("Uptime: 0s");
 
         NumberAxis xAxis = new NumberAxis();
         NumberAxis yAxis = new NumberAxis();
         xAxis.setLabel("Time (s)");
-        LineChart<Number, Number> chart = new LineChart<>(xAxis, yAxis);
-        chart.setTitle("Server Resource Usage");
-        chart.setAnimated(false);
-        chart.setCreateSymbols(false);
-        chart.getData().clear();
+        xAxis.setForceZeroInRange(false);
+        xAxis.setAutoRanging(false);
+        yAxis.setAutoRanging(true);
+        healthChart = new LineChart<>(xAxis, yAxis);
+        healthChart.setTitle("Server Resource Usage");
+        healthChart.setAnimated(false);
+        healthChart.setCreateSymbols(false);
+        healthChart.getData().clear();
 
         // Dropdown for metric selection
         ComboBox<String> metricSelector = new ComboBox<>(FXCollections.observableArrayList("CPU %", "Memory MB", "Threads", "DB Size MB"));
         metricSelector.setValue("CPU %");
         metricSelector.setOnAction(e -> {
             currentMetric = metricSelector.getValue();
-            updateHealthChart(chart, currentMetric, currentRange);
+            updateHealthChart();
         });
 
         // Dropdown for history range
@@ -434,74 +497,159 @@ public class FreeSRSManager extends Application {
         rangeSelector.setValue("Day");
         rangeSelector.setOnAction(e -> {
             currentRange = rangeSelector.getValue();
-            updateHealthChart(chart, currentMetric, currentRange);
+            updateHealthChart();
         });
 
-        vbox.getChildren().addAll(connLabel, memLabel, cpuLabel, threadLabel, dbLabel, metricSelector, rangeSelector, chart);
+        vbox.getChildren().addAll(connLabel, memLabel, sysMemLabel, cpuLabel, threadLabel, dbLabel, uptimeLabel, new Label("Metric:"), metricSelector, new Label("Time Range:"), rangeSelector, healthChart);
         tab.setContent(vbox);
-        tab.setOnSelectionChanged(e -> {
-            if (tab.isSelected()) startHealthMonitor(connLabel, memLabel, cpuLabel, threadLabel, dbLabel, chart);
-            else stopHealthMonitor();
-        });
         return tab;
     }
 
-    private void startHealthMonitor(Label connLabel, Label memLabel, Label cpuLabel, Label threadLabel, Label dbLabel, LineChart<Number, Number> chart) {
+    private void startHealthMonitor() {
         stopHealthMonitor();
-        healthStartTime = System.currentTimeMillis();
         healthTimer = new Timer(true);
         healthTimer.scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
-                Platform.runLater(() -> updateHealth(connLabel, memLabel, cpuLabel, threadLabel, dbLabel, chart));
+                Platform.runLater(() -> updateHealth());
             }
         }, 0, 2000);
     }
     private void stopHealthMonitor() {
-        if (healthTimer != null) healthTimer.cancel();
+        if (healthTimer != null) {
+            healthTimer.cancel();
+            healthTimer = null;
+        }
     }
-    private void updateHealth(Label connLabel, Label memLabel, Label cpuLabel, Label threadLabel, Label dbLabel, LineChart<Number, Number> chart) {
+    private void updateHealth() {
         try {
             int activeConns = getActiveConnections();
+
+            // JVM Memory
             long memUsed = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
             double memMB = memUsed / (1024.0 * 1024.0);
+            double maxMemMB = Runtime.getRuntime().maxMemory() / (1024.0 * 1024.0);
+
+            // System Memory
+            OperatingSystemMXBean osMXBean = ManagementFactory.getOperatingSystemMXBean();
+            long totalSysMem = 0;
+            long freeSysMem = 0;
+            if (osMXBean instanceof com.sun.management.OperatingSystemMXBean sunOsMXBean) {
+                totalSysMem = sunOsMXBean.getTotalMemorySize();
+                freeSysMem = sunOsMXBean.getFreeMemorySize();
+            }
+            double totalSysMemMB = totalSysMem / (1024.0 * 1024.0);
+            double usedSysMemMB = (totalSysMem - freeSysMem) / (1024.0 * 1024.0);
+
             double cpuLoad = getCpuLoad();
             int threads = getThreadCount();
             long dbSize = getDbSize();
             double dbMB = dbSize / (1024.0 * 1024.0);
             long t = (System.currentTimeMillis() - healthStartTime) / 1000;
-            connLabel.setText("Active Connections: " + activeConns);
-            memLabel.setText(String.format("Memory Used: %.1f MB", memMB));
-            cpuLabel.setText(String.format("CPU Load: %.1f%%", cpuLoad * 100));
-            threadLabel.setText("Active Threads: " + threads);
-            dbLabel.setText(String.format("DB Size: %.1f MB", dbMB));
-            // Store history
+
+            // Format uptime
+            long uptimeSec = t;
+            String uptimeStr = String.format("%dd %dh %dm %ds",
+                    uptimeSec / 86400,
+                    (uptimeSec % 86400) / 3600,
+                    (uptimeSec % 3600) / 60,
+                    uptimeSec % 60);
+
+            if (connLabel != null) connLabel.setText("Active Connections: " + activeConns);
+            if (memLabel != null) memLabel.setText(String.format("JVM Memory: %.1f / %.1f MB", memMB, maxMemMB));
+            if (sysMemLabel != null) sysMemLabel.setText(String.format("System Memory: %.1f / %.1f MB", usedSysMemMB, totalSysMemMB));
+            if (cpuLabel != null) cpuLabel.setText(String.format("CPU Load: %.1f%%", cpuLoad * 100));
+            if (threadLabel != null) threadLabel.setText("Active Threads: " + threads);
+            if (dbLabel != null) dbLabel.setText(String.format("DB Size: %.1f MB", dbMB));
+            if (uptimeLabel != null) uptimeLabel.setText("Uptime: " + uptimeStr);
+
             addHealthHistory("CPU %", t, cpuLoad * 100);
             addHealthHistory("Memory MB", t, memMB);
             addHealthHistory("Threads", t, threads);
             addHealthHistory("DB Size MB", t, dbMB);
-            updateHealthChart(chart, currentMetric, currentRange);
+            if (healthChart != null) updateHealthChart();
         } catch (Exception e) {
             // ignore
         }
     }
-    /**
-     * Adds health history data for a metric.
-     * @param metric the metric name
-     * @param t timestamp
-     * @param value metric value
-     */
     private void addHealthHistory(String metric, long t, double value) {
         healthHistory.putIfAbsent(metric, new ArrayList<>());
-        healthHistory.get(metric).add(new XYChart.Data<>(t, value));
+        List<HealthDataPoint> list = healthHistory.get(metric);
+        list.add(new HealthDataPoint(t, value));
+        if (list.size() > MAX_HISTORY_POINTS) list.remove(0);
     }
-    private void updateHealthChart(LineChart<Number, Number> chart, String metric, String range) {
-        chart.getData().clear();
-        List<XYChart.Data<Number, Number>> data = healthHistory.getOrDefault(metric, new ArrayList<>());
+    private void updateHealthChart() {
+        if (healthChart == null) return;
+        healthChart.getData().clear();
+        List<HealthDataPoint> allData = healthHistory.getOrDefault(currentMetric, new ArrayList<>());
+
+        long maxTimeRange = switch (currentRange) {
+            case "Day" -> 24 * 60 * 60;
+            case "Week" -> 7 * 24 * 60 * 60;
+            case "Month" -> 30 * 24 * 60 * 60;
+            case "Year" -> 365 * 24 * 60 * 60;
+            default -> 24 * 60 * 60;
+        };
+
+        long currentTime = (System.currentTimeMillis() - healthStartTime) / 1000;
+        long minTime = Math.max(0, currentTime - maxTimeRange);
+
         XYChart.Series<Number, Number> series = new XYChart.Series<>();
-        series.setName(metric);
-        series.getData().addAll(data);
-        chart.getData().add(series);
+        series.setName(currentMetric);
+        for (HealthDataPoint dp : allData) {
+            if (dp.time >= minTime) series.getData().add(new XYChart.Data<>(dp.time, dp.value));
+        }
+
+        healthChart.getData().add(series);
+
+        if (healthChart.getXAxis() instanceof NumberAxis xAxis) {
+            if (series.getData().isEmpty()) {
+                xAxis.setLowerBound(0);
+                xAxis.setUpperBound(maxTimeRange);
+            } else {
+                xAxis.setLowerBound(minTime);
+                xAxis.setUpperBound(Math.max(currentTime, minTime + 10));
+                double tickUnit = switch (currentRange) {
+                    case "Day" -> 3600;
+                    case "Week" -> 86400;
+                    case "Month" -> 259200;
+                    case "Year" -> 2592000;
+                    default -> 3600;
+                };
+                xAxis.setTickUnit(tickUnit);
+            }
+            xAxis.setAutoRanging(false);
+        }
+    }
+    private void saveHealthHistory() {
+        try {
+            Map<String, Object> data = new HashMap<>();
+            data.put("startTime", healthStartTime);
+            data.put("history", healthHistory);
+            new ObjectMapper().writeValue(new java.io.File(HEALTH_HISTORY_FILE), data);
+        } catch (Exception e) {
+            System.err.println("Failed to save health history: " + e.getMessage());
+        }
+    }
+    private void loadHealthHistory() {
+        try {
+            java.io.File file = new java.io.File(HEALTH_HISTORY_FILE);
+            if (!file.exists()) return;
+            Map<String, Object> data = new ObjectMapper().readValue(file, new TypeReference<Map<String, Object>>(){});
+            if (data != null) {
+                healthStartTime = ((Number) data.get("startTime")).longValue();
+                Map<String, List<Map<String, Number>>> rawHistory = (Map<String, List<Map<String, Number>>>) data.get("history");
+                for (Map.Entry<String, List<Map<String, Number>>> entry : rawHistory.entrySet()) {
+                    List<HealthDataPoint> points = new ArrayList<>();
+                    for (Map<String, Number> point : entry.getValue()) {
+                        points.add(new HealthDataPoint(point.get("time").longValue(), point.get("value").doubleValue()));
+                    }
+                    healthHistory.put(entry.getKey(), points);
+                }
+            }
+        } catch (Exception e) {
+            // No history file or error reading, start fresh
+        }
     }
 
     private void startServer() {
@@ -659,42 +807,79 @@ public class FreeSRSManager extends Application {
         });
     }
 
-    private void startHealthMonitor(Label... labels) {
-        stopHealthMonitor();
-        healthStartTime = System.currentTimeMillis();
-        healthTimer = new Timer(true);
-        healthTimer.scheduleAtFixedRate(new TimerTask() {
+    private Tab createConnectionLogsTab() {
+        Tab tab = new Tab("Connection Logs");
+        tab.setClosable(false);
+
+        VBox vbox = new VBox(12);
+        vbox.setPadding(new Insets(20));
+
+        connectionLog = new TextArea();
+        connectionLog.setEditable(false);
+        connectionLog.setWrapText(true);
+        connectionLog.setPrefHeight(500);
+        connectionLog.getStyleClass().add("log-area");
+        connectionLog.appendText("Connection Log Started\n");
+        connectionLog.appendText("===================\n\n");
+
+        Button clearBtn = new Button("Clear Log");
+        clearBtn.setOnAction(e -> {
+            connectionLog.clear();
+            connectionLog.appendText("Log cleared at " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date()) + "\n\n");
+        });
+
+        Button refreshBtn = new Button("Refresh Connections");
+        refreshBtn.setOnAction(e -> refreshConnectionLog());
+
+        HBox buttonBox = new HBox(10, refreshBtn, clearBtn);
+        vbox.getChildren().addAll(new Label("Active Connections and Recent Activity:"), buttonBox, connectionLog);
+
+        tab.setContent(vbox);
+        tab.setOnSelectionChanged(e -> {
+            if (tab.isSelected()) startConnectionLogMonitor();
+            else stopConnectionLogMonitor();
+        });
+
+        return tab;
+    }
+
+    private void startConnectionLogMonitor() {
+        if (connectionLogTimer != null) connectionLogTimer.cancel();
+        connectionLogTimer = new Timer(true);
+        connectionLogTimer.scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
-                Platform.runLater(() -> updateHealth(labels));
+                Platform.runLater(() -> refreshConnectionLog());
             }
-        }, 0, 2000);
+        }, 0, 5000); // Update every 5 seconds
     }
-    private void updateHealth(Label... labels) {
-        try {
-            int activeConns = getActiveConnections();
-            long memUsed = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
-            double memMB = memUsed / (1024.0 * 1024.0);
-            double cpuLoad = getCpuLoad();
-            int threads = getThreadCount();
-            long dbSize = getDbSize();
-            double dbMB = dbSize / (1024.0 * 1024.0);
-            long t = (System.currentTimeMillis() - healthStartTime) / 1000;
-            if (labels.length > 0) labels[0].setText("Active Connections: " + activeConns);
-            if (labels.length > 1) labels[1].setText(String.format("Memory Used: %.1f MB", memMB));
-            if (labels.length > 2) labels[2].setText(String.format("CPU Load: %.1f%%", cpuLoad * 100));
-            if (labels.length > 3) labels[3].setText("Active Threads: " + threads);
-            if (labels.length > 4) labels[4].setText(String.format("DB Size: %.1f MB", dbMB));
-            cpuSeries.getData().add(new XYChart.Data<>(t, cpuLoad * 100));
-            memSeries.getData().add(new XYChart.Data<>(t, memMB));
-            threadSeries.getData().add(new XYChart.Data<>(t, threads));
-            if (cpuSeries.getData().size() > 100) cpuSeries.getData().remove(0);
-            if (memSeries.getData().size() > 100) memSeries.getData().remove(0);
-            if (threadSeries.getData().size() > 100) threadSeries.getData().remove(0);
-        } catch (Exception e) {
-            // ignore
+
+    private void stopConnectionLogMonitor() {
+        if (connectionLogTimer != null) {
+            connectionLogTimer.cancel();
+            connectionLogTimer = null;
         }
     }
+
+    private void refreshConnectionLog() {
+        if (connectionLog == null) return;
+
+        // Simulate connection info - in real scenario, would query server
+        String timestamp = new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date());
+
+        // Keep log size manageable
+        String currentText = connectionLog.getText();
+        String[] lines = currentText.split("\n");
+        if (lines.length > 100) {
+            // Keep only last 80 lines
+            StringBuilder sb = new StringBuilder();
+            for (int i = lines.length - 80; i < lines.length; i++) {
+                sb.append(lines[i]).append("\n");
+            }
+            connectionLog.setText(sb.toString());
+        }
+    }
+
     private int getActiveConnections() {
         // This should query the server for active connections; fallback to 0
         // If manager runs in same JVM, can access ClientManager; otherwise, use a socket or status file

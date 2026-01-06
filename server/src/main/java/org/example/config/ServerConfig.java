@@ -2,15 +2,11 @@ package org.example.config;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.example.config.DatabaseConfig;
 
 public class ServerConfig {
     private int port = 5555;
     private String resourcesPath = "dfs_root";
-    private List<String> roles = new ArrayList<>();
     private DatabaseConfig db;
     private String adminUser;
     private String adminPass;
@@ -43,8 +39,6 @@ public class ServerConfig {
     public void setPort(int port) { this.port = port; }
     public String getResourcesPath() { return resourcesPath; }
     public void setResourcesPath(String resourcesPath) { this.resourcesPath = resourcesPath; }
-    public List<String> getRoles() { return roles; }
-    public void setRoles(List<String> roles) { this.roles = roles; }
     public DatabaseConfig getDb() { return db; }
     public void setDb(DatabaseConfig db) { this.db = db; }
     public String getAdminUser() { return adminUser; }

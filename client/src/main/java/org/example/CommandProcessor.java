@@ -4,15 +4,19 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
+import java.util.Objects;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 public class CommandProcessor {
     private final Connection connection;
     private final Consumer<String> output;
+    private final BiConsumer<String, String> notification;
 
-    public CommandProcessor(Connection connection, Consumer<String> output) {
+    public CommandProcessor(Connection connection, Consumer<String> output, BiConsumer<String, String> notification) {
         this.connection = connection;
         this.output = output;
+        this.notification = notification;
     }
 
     public void process(String line) {
@@ -60,6 +64,7 @@ public class CommandProcessor {
 
     private void handleUpload(String args) throws IOException, InterruptedException {
         if (args.isEmpty()) {
+            notification.accept("Usage: upload <local-file-path> [remote-name]", "warning");
             output.accept("Usage: upload <local-file-path> [remote-name]");
             return;
         }
@@ -71,6 +76,7 @@ public class CommandProcessor {
 
         Path filePath = Path.of(localPath);
         if (!Files.exists(filePath) || !Files.isRegularFile(filePath)) {
+            notification.accept("File not found: " + localPath, "error");
             output.accept("ERROR: File not found: " + localPath);
             return;
         }
@@ -83,6 +89,7 @@ public class CommandProcessor {
         String response = connection.sendAndWaitForResponse("upload " + localPath + " " + remotePath, 10000);
 
         if (response == null) {
+            notification.accept("No response from server", "error");
             output.accept("ERROR: No response from server");
             return;
         }
@@ -101,6 +108,7 @@ public class CommandProcessor {
 
     private void handleDownload(String args) {
         if (args.isEmpty()) {
+            notification.accept("Usage: download <remote-file-path>", "warning");
             output.accept("Usage: download <remote-file-path>");
             return;
         }
@@ -110,6 +118,7 @@ public class CommandProcessor {
             String response = connection.sendAndWaitForResponse("download " + args, 10000);
 
             if (response == null) {
+                notification.accept("No response from server", "error");
                 output.accept("ERROR: No response from server");
                 return;
             }
@@ -119,11 +128,13 @@ public class CommandProcessor {
                 byte[] fileData = Base64.getDecoder().decode(base64Data);
                 String fileName = Path.of(args).getFileName().toString();
                 Files.write(Path.of(fileName), fileData);
+                notification.accept("File downloaded: " + fileName + " (" + fileData.length + " bytes)", "success");
                 output.accept("SUCCESS: File downloaded as: " + fileName + " (" + fileData.length + " bytes)");
             } else {
                 handleServerResponse(response);
             }
         } catch (Exception e) {
+            notification.accept("Download failed: " + e.getMessage(), "error");
             output.accept("Download failed: " + e.getMessage());
         }
     }
@@ -164,11 +175,20 @@ public class CommandProcessor {
 
     private void handleServerResponse(String response) {
         if (response == null) {
+            notification.accept("No response from server", "error");
             output.accept("No response from server");
+        } else if (response.startsWith("ERROR: Permission denied")) {
+            notification.accept("Permission denied - Your role (" + connection.getRole() + ") doesn't allow this command", "error");
+            output.accept("ERROR: Permission denied - Your role (" + connection.getRole() + ") doesn't allow this command.");
+            output.accept("Tip: Type 'help' to see available commands for your role.");
         } else if (response.startsWith("ERROR:")) {
-            output.accept("ERROR: " + response.substring(6));
+            String errorMsg = response.substring(6).trim();
+            notification.accept(errorMsg, "error");
+            output.accept("ERROR: " + errorMsg);
         } else if (response.startsWith("SUCCESS:")) {
-            output.accept("SUCCESS: " + response.substring(8));
+            String successMsg = response.substring(8).trim();
+            notification.accept(successMsg, "success");
+            output.accept("SUCCESS: " + successMsg);
         } else {
             output.accept(response);
         }
@@ -176,11 +196,7 @@ public class CommandProcessor {
 
     private void showHelp() throws IOException, InterruptedException {
         String response = connection.sendAndWaitForResponse("help", 5000);
-        if (response != null) {
-            output.accept(response);
-        } else {
-            output.accept("ERROR: Could not fetch help from server");
-        }
+        output.accept(Objects.requireNonNullElse(response, "ERROR: Could not fetch help from server"));
     }
 
     private void showStatus() {

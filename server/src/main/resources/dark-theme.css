@@ -1,60 +1,169 @@
-root {
+/* Root and base styling */
+.root {
     -fx-base: #2b2b2b;
+    -fx-background: #1e1e1e;
+    -fx-control-inner-background: #2b2b2b;
+    -fx-font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial;
 }
 
-.root {
-    -fx-background-color: #1e1e1e;
-    -fx-font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial;
+/* Text colors */
+.label {
     -fx-text-fill: #e6e6e6;
 }
 
-.label, .check-box, .list-cell, .text-field, .password-field, .text-area {
-    -fx-text-fill: #ffffff !important;
+/* Text inputs */
+.text-field, .password-field, .text-area {
+    -fx-background-color: #2b2b2b;
+    -fx-text-fill: #e6e6e6;
+    -fx-prompt-text-fill: #808080;
 }
 
+/* Buttons */
 .button {
-    -fx-background-color: linear-gradient(#3a3a3a, #2b2b2b);
+    -fx-background-color: #3a3a3a;
+    -fx-text-fill: #e6e6e6;
+}
+
+.button:hover {
+    -fx-background-color: #4a4a4a;
+}
+
+/* List views */
+.list-view {
+    -fx-background-color: #2b2b2b;
+}
+
+.list-cell {
+    -fx-background-color: transparent;
+    -fx-text-fill: #e6e6e6;
+}
+
+.list-cell:filled:selected {
+    -fx-background-color: #3a3a3a;
     -fx-text-fill: #ffffff;
-    -fx-border-color: #444444;
 }
 
-.text-field, .password-field, .text-area, .list-view {
-    -fx-background-color: #262626;
-    -fx-text-fill: #ffffff !important;
-    -fx-border-color: #3a3a3a;
+.list-cell:filled:hover {
+    -fx-background-color: #333333;
 }
 
-/* Make checkbox text readable */
-.check-box, .list-cell {
-    -fx-text-fill: #ffffff !important;
+/* CheckBox */
+.check-box {
+    -fx-text-fill: #e6e6e6;
 }
 
-.check-box .text, .check-box .label {
-    -fx-fill: #ffffff !important;
-    -fx-text-fill: #ffffff !important;
+.check-box .box {
+    -fx-background-color: #2b2b2b;
+    -fx-border-color: #555555;
 }
 
-/* role editor area background so inputs contrast */
-.vbox {
-    -fx-background-color: #262626;
-    -fx-padding: 8;
-    -fx-border-color: #333333;
-    -fx-border-radius: 4;
-    -fx-background-radius: 4;
+.check-box:selected .mark {
+    -fx-background-color: #e6e6e6;
+}
+
+/* CheckBox in ListView */
+.check-box-list-cell {
+    -fx-background-color: transparent;
+    -fx-text-fill: #e6e6e6;
+}
+
+.check-box-list-cell:filled:selected {
+    -fx-background-color: #3a3a3a;
+}
+
+/* ComboBox */
+.combo-box {
+    -fx-background-color: #2b2b2b;
+}
+
+.combo-box .list-cell {
+    -fx-background-color: #2b2b2b;
+    -fx-text-fill: #e6e6e6;
+}
+
+.combo-box-popup .list-view {
+    -fx-background-color: #2b2b2b;
+}
+
+.combo-box-popup .list-view .list-cell:hover {
+    -fx-background-color: #3a3a3a;
+}
+
+/* Tabs */
+.tab-pane {
+    -fx-tab-min-height: 30px;
 }
 
 .tab-pane .tab-header-background {
-    -fx-background-color: #141414;
+    -fx-background-color: #1a1a1a;
 }
 
 .tab-pane .tab {
-    -fx-background-color: transparent;
-    -fx-text-base-color: #e6e6e6;
+    -fx-background-color: #2b2b2b;
 }
 
+.tab-pane .tab:selected {
+    -fx-background-color: #3a3a3a;
+}
+
+.tab-pane .tab .tab-label {
+    -fx-text-fill: #e6e6e6;
+}
+
+.tab-pane .tab-content-area {
+    -fx-background-color: #1e1e1e;
+}
+
+/* Server log area */
 .log-area {
     -fx-control-inner-background: #0f0f0f;
     -fx-font-family: "Monospaced";
     -fx-font-size: 12px;
     -fx-text-fill: #cfcfcf;
+}
+
+/* Charts */
+.chart {
+    -fx-background-color: transparent;
+}
+
+.chart-content {
+    -fx-padding: 10px;
+}
+
+.chart-plot-background {
+    -fx-background-color: #2b2b2b;
+}
+
+.chart-title {
+    -fx-text-fill: #e6e6e6;
+}
+
+.axis {
+    -fx-tick-label-fill: #e6e6e6;
+}
+
+.axis-label {
+    -fx-text-fill: #e6e6e6;
+}
+
+.chart-legend {
+    -fx-background-color: #2b2b2b;
+}
+
+.chart-legend-item-text {
+    -fx-fill: #e6e6e6;
+}
+
+/* Scroll bars */
+.scroll-bar {
+    -fx-background-color: #2b2b2b;
+}
+
+.scroll-bar .thumb {
+    -fx-background-color: #4a4a4a;
+}
+
+.scroll-bar .thumb:hover {
+    -fx-background-color: #5a5a5a;
 }

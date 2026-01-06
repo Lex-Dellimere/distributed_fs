@@ -10,4 +10,3 @@ public enum EntryType {
         return name().toLowerCase();
     }
 }
-

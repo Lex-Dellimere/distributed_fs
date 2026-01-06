@@ -13,7 +13,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 public class DatabaseManager {
     private final ServerConfig config;
@@ -30,45 +29,58 @@ public class DatabaseManager {
      * @throws SQLException if a database error occurs
      */
     public void initialize() throws SQLException {
-        if (config.getDb() == null) {
-            config.setDb(new DatabaseConfig("dfs_database.db"));
+        // Determine SQLite database path
+        String sqlitePath = null;
+
+        if (config.getDb() != null && config.getDb().sqlitePath() != null && !config.getDb().sqlitePath().trim().isEmpty()) {
+            sqlitePath = config.getDb().sqlitePath().trim();
         }
 
-        // Resolve or create sqlite file
-        try {
-            String sqlitePath = config.getDb() == null || config.getDb().sqlitePath() == null ? "" : config.getDb().sqlitePath().trim();
-            if (sqlitePath.isEmpty() || !Files.exists(Path.of(sqlitePath))) {
-                // Try common candidates
-                List<String> candidates = Arrays.asList("dfs_database.db", "freedrs.db", "data/dfs_database.db", "data/freedrs.db");
-                String found = null;
-                for (String c : candidates) {
-                    Path p = Path.of(c);
-                    if (Files.exists(p)) {
-                        found = p.toString();
-                        break;
-                    }
+        // If no path configured or file doesn't exist, search for existing database
+        if (sqlitePath == null || !Files.exists(Path.of(sqlitePath))) {
+            // Try to find existing database
+            List<String> candidates = Arrays.asList(
+                "dfs_database.db",
+                "freedrs.db",
+                "data/dfs_database.db",
+                "data/freedrs.db",
+                "./dfs_database.db"
+            );
+
+            for (String candidate : candidates) {
+                if (Files.exists(Path.of(candidate))) {
+                    sqlitePath = candidate;
+                    System.out.println("Found existing database: " + sqlitePath);
+                    break;
                 }
-                if (found == null) {
-                    // create default under data/
-                    Path defaultPath = Path.of("data", "dfs_database.db");
-                    if (defaultPath.getParent() != null) Files.createDirectories(defaultPath.getParent());
-                    if (!Files.exists(defaultPath)) Files.createFile(defaultPath);
-                    try {
-                        Set<PosixFilePermission> perms = PosixFilePermissions.fromString("rw-------");
-                        Files.setPosixFilePermissions(defaultPath, perms);
-                    } catch (UnsupportedOperationException | IOException ignored) {
-                        // ignore on non-POSIX
-                    }
-                    found = defaultPath.toString();
-                }
-                config.setDb(new org.example.config.DatabaseConfig(found));
-                config.save();
             }
-        } catch (IOException ioe) {
-            System.err.println("Warning: could not ensure sqlite file: " + ioe.getMessage());
+
+            // If no database found, create new one
+            if (sqlitePath == null) {
+                sqlitePath = "dfs_database.db";
+                System.out.println("Creating new database: " + sqlitePath);
+            }
+
+            // Update config with resolved path
+            config.setDb(new DatabaseConfig(sqlitePath));
+            config.save();
+        } else {
+            System.out.println("Using configured database: " + sqlitePath);
         }
 
-        connection = DriverManager.getConnection("jdbc:sqlite:" + config.getDb().sqlitePath());
+        // SQLite will auto-create the database file if it doesn't exist
+        connection = DriverManager.getConnection("jdbc:sqlite:" + sqlitePath);
+
+        // Set proper file permissions on newly created database (POSIX systems only)
+        try {
+            Path dbPath = Path.of(sqlitePath);
+            if (Files.exists(dbPath)) {
+                Set<PosixFilePermission> perms = PosixFilePermissions.fromString("rw-------");
+                Files.setPosixFilePermissions(dbPath, perms);
+            }
+        } catch (UnsupportedOperationException | IOException ignored) {
+            // ignore on non-POSIX systems or if permissions can't be set
+        }
 
         try (Statement stmt = connection.createStatement()) {
             // Users table
@@ -205,10 +217,14 @@ public class DatabaseManager {
      */
     public List<String> getAllRoles() throws SQLException {
         String sql = "SELECT name FROM roles";
+        List<String> roles = new ArrayList<>();
         try (PreparedStatement stmt = connection.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
-            return rs.next() ? List.of(rs.getString("name")) : List.of();
+            while (rs.next()) {
+                roles.add(rs.getString("name"));
+            }
         }
+        return roles;
     }
 
     public String getRoleCommands(String roleName) throws SQLException {
@@ -223,33 +239,33 @@ public class DatabaseManager {
         return null;
     }
 
-    public boolean deleteRole(String roleName) throws SQLException {
+    public void deleteRole(String roleName) throws SQLException {
         String sql = "DELETE FROM roles WHERE name = ?";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setString(1, roleName);
-            return pstmt.executeUpdate() > 0;
+            pstmt.executeUpdate();
         }
     }
 
     /**
-     * Checks if a command is allowed for a given role.
+     * Checks if a command is NOT allowed for a given role.
      *
      * @param roleName the role name
      * @param command  the command
-     * @return true if allowed, false otherwise
+     * @return true if forbidden, false if allowed
      * @throws SQLException if a database error occurs
      */
-    public boolean isCommandAllowed(String roleName, String command) throws SQLException {
+    public boolean isCommandForbidden(String roleName, String command) throws SQLException {
         String commands = getRoleCommands(roleName);
         if (commands == null) {
             // If role not found, treat as restrictive: only allow a small set (fallback)
-            return List.of("list","pwd","cd","help","whoami","quit","exit").contains(command);
+            return !List.of("list","pwd","cd","help","whoami","quit","exit").contains(command);
         }
-        if (commands.trim().equals("*")) return true;
+        if (commands.trim().equals("*")) return false;
         List<String> allowed = Arrays.stream(commands.split(","))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .toList();
-        return allowed.contains(command);
+        return !allowed.contains(command);
     }
 }
