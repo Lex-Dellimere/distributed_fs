@@ -5,9 +5,6 @@ import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.VBox;
 
-/**
- * Authentication dialog for login, signup, or guest access.
- */
 public class AuthDialog extends Dialog<AuthResult> {
 
     public AuthDialog() {
@@ -17,15 +14,15 @@ public class AuthDialog extends Dialog<AuthResult> {
         TabPane tabPane = new TabPane();
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
-        // Login Tab
+        
         Tab loginTab = new Tab("Login");
         loginTab.setContent(createLoginPane());
 
-        // Signup Tab
+        
         Tab signupTab = new Tab("Sign Up");
         signupTab.setContent(createSignupPane());
 
-        // Guest Tab
+        
         Tab guestTab = new Tab("Guest");
         guestTab.setContent(createGuestPane());
 

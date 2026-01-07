@@ -43,10 +43,6 @@ import java.nio.file.Path;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 
-/**
- * Main application for managing FreeSRS server and users.
- * Uses JavaFX for UI and modern Java features.
- */
 public class FreeSRSManager extends Application {
     private ServerConfig config;
     private DatabaseManager dbManager;
@@ -64,9 +60,9 @@ public class FreeSRSManager extends Application {
     private Timer connectionLogTimer;
     private long healthStartTime = System.currentTimeMillis();
     private static final String HEALTH_HISTORY_FILE = "health_history.json";
-    private static final int MAX_HISTORY_POINTS = 43200; // 24 hours at 2s intervals
+    private static final int MAX_HISTORY_POINTS = 43200; 
 
-    // Health data storage for history
+    
     private final Map<String, List<HealthDataPoint>> healthHistory = new HashMap<>();
     private String currentMetric = "CPU %";
     private String currentRange = "Day";
@@ -83,12 +79,12 @@ public class FreeSRSManager extends Application {
     public void start(Stage primaryStage) {
         config = ServerConfig.load();
 
-        // Initialize DB early so we can display resolved sqlite path and ensure DB exists
+        
         try {
             dbManager = new DatabaseManager(config);
             dbManager.initialize();
         } catch (Exception e) {
-            // non-fatal; show status later
+            
             System.err.println("DB init warning: " + e.getMessage());
         }
 
@@ -105,7 +101,7 @@ public class FreeSRSManager extends Application {
         statusLabel = new Label("Ready");
         root.setBottom(new HBox(10, new Label("Status:"), statusLabel));
 
-        // Error bubble overlay
+        
         rootStack = new StackPane(root);
         errorBubbleBox = new VBox(8);
         errorBubbleBox.setMouseTransparent(true);
@@ -114,7 +110,7 @@ public class FreeSRSManager extends Application {
         rootStack.getChildren().add(errorBubbleBox);
 
         Scene scene = new Scene(rootStack, 900, 600);
-        // apply dark theme
+        
         try {
             scene.getStylesheets().add(getClass().getResource("/dark-theme.css").toExternalForm());
         } catch (Exception ignored) {}
@@ -186,7 +182,7 @@ public class FreeSRSManager extends Application {
         TextField adminUserField = new TextField(config.getAdminUser() == null ? "" : config.getAdminUser());
         PasswordField adminPassField = new PasswordField();
 
-        // Show resolved SQLite DB path (auto-resolved); not editable
+        
         Label sqlitePathLabel = new Label(config.getDb() == null ? "(not initialized)" : config.getDb().sqlitePath());
 
         grid.add(new Label("Server Port:"), 0, 0);
@@ -203,7 +199,7 @@ public class FreeSRSManager extends Application {
 
         Button saveBtn = new Button("Save Configuration");
         saveBtn.setOnAction(e -> {
-            // Validate port
+            
             try {
                 int port = Integer.parseInt(portField.getText());
                 if (port < 1024 || port > 65535) {
@@ -215,19 +211,19 @@ public class FreeSRSManager extends Application {
                 return;
             }
 
-            // Validate path
+            
             if (pathField.getText().trim().isEmpty()) {
                 showErrorBubble("Server root path cannot be empty");
                 return;
             }
 
-            // Validate username if provided
+            
             if (!adminUserField.getText().isEmpty() && adminUserField.getText().length() < 3) {
                 showErrorBubble("Username must be at least 3 characters");
                 return;
             }
 
-            // Validate password if provided
+            
             if (!adminPassField.getText().isEmpty() && adminPassField.getText().length() < 3) {
                 showErrorBubble("Password must be at least 3 characters");
                 return;
@@ -256,6 +252,10 @@ public class FreeSRSManager extends Application {
 
         HBox btnBox = new HBox(10, saveBtn);
         grid.add(btnBox, 1, 5);
+        
+        Button resetBtn = new Button("Reset System");
+        resetBtn.setOnAction(e -> showResetSystemDialog());
+        grid.add(resetBtn, 1, 6);
 
         tab.setContent(grid);
         return tab;
@@ -316,8 +316,14 @@ public class FreeSRSManager extends Application {
 
         Button changeRoleBtn = new Button("Change Role");
         changeRoleBtn.setOnAction(e -> showChangeRoleDialog());
+        
+        Button deleteUserBtn = new Button("Delete User");
+        deleteUserBtn.setOnAction(e -> showDeleteUserDialog());
+        
+        Button renameUserBtn = new Button("Rename User");
+        renameUserBtn.setOnAction(e -> showRenameUserDialog());
 
-        rightBox.getChildren().addAll(refreshBtn, changeRoleBtn);
+        rightBox.getChildren().addAll(refreshBtn, changeRoleBtn, renameUserBtn, deleteUserBtn);
         pane.setRight(rightBox);
 
         tab.setContent(pane);
@@ -333,10 +339,10 @@ public class FreeSRSManager extends Application {
 
         ListView<String> rolesList = new ListView<>();
         TextField roleName = new TextField();
-        // Checkbox list for commands
+        
         ObservableList<String> allCommands = FXCollections.observableArrayList(
                 "upload","download","list","myfiles","pwd","cd","delete","mkdir","whoami","help","refresh","quit","exit","listclients","clientinfo",
-                // admin commands
+                
                 "listroles","createrole","deleterole","shutdown","kick","setrole"
         );
         Map<String, BooleanProperty> commandSelection = new LinkedHashMap<>();
@@ -370,7 +376,7 @@ public class FreeSRSManager extends Application {
                     showErrorBubble("Cannot create built-in role: " + rn);
                     return;
                 }
-                // collect selected commands
+                
                 List<String> selected = new ArrayList<>();
                 for (Map.Entry<String, BooleanProperty> entry : commandSelection.entrySet()) {
                     if (entry.getValue().get()) selected.add(entry.getKey());
@@ -382,7 +388,7 @@ public class FreeSRSManager extends Application {
                 String cmds = String.join(",", selected);
                  if (dbManager == null) dbManager = new DatabaseManager(config);
                  dbManager.initialize();
-                 // Check if role exists
+                 
                  if (dbManager.getRoleCommands(rn) != null) {
                      showErrorBubble("Role '" + rn + "' already exists.");
                      return;
@@ -433,7 +439,7 @@ public class FreeSRSManager extends Application {
                  dbManager.initialize();
                  roleName.setText(newV);
                 String cmds = dbManager.getRoleCommands(newV);
-                // reset selections
+                
                 for (Map.Entry<String, BooleanProperty> entry : commandSelection.entrySet()) entry.getValue().set(false);
                 if (cmds != null && !cmds.trim().isEmpty()) {
                     String[] parts = cmds.split(",");
@@ -449,15 +455,16 @@ public class FreeSRSManager extends Application {
 
          VBox rightBox = new VBox(8, new Label("Role Name:"), roleName, new Label("Commands (tick to allow):"), commandsListView, new HBox(8, saveRole, deleteRole), refreshRoles);
          rightBox.setPadding(new Insets(10));
+         
+         Label builtinLabel = new Label("Built-in roles: admin, guest");
+         builtinLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
-         pane.setLeft(new VBox(5, new Label("Available Roles:"), rolesList));
+         pane.setLeft(new VBox(5, new Label("Available Roles:"), rolesList, builtinLabel));
          pane.setCenter(rightBox);
 
          tab.setContent(pane);
          return tab;
      }
-
-
     private Tab createHealthTab() {
         Tab tab = new Tab("Server Health");
         tab.setClosable(false);
@@ -484,7 +491,7 @@ public class FreeSRSManager extends Application {
         healthChart.setCreateSymbols(false);
         healthChart.getData().clear();
 
-        // Dropdown for metric selection
+        
         ComboBox<String> metricSelector = new ComboBox<>(FXCollections.observableArrayList("CPU %", "Memory MB", "Threads", "DB Size MB"));
         metricSelector.setValue("CPU %");
         metricSelector.setOnAction(e -> {
@@ -492,7 +499,7 @@ public class FreeSRSManager extends Application {
             updateHealthChart();
         });
 
-        // Dropdown for history range
+        
         ComboBox<String> rangeSelector = new ComboBox<>(FXCollections.observableArrayList("Day", "Week", "Month", "Year"));
         rangeSelector.setValue("Day");
         rangeSelector.setOnAction(e -> {
@@ -525,12 +532,12 @@ public class FreeSRSManager extends Application {
         try {
             int activeConns = getActiveConnections();
 
-            // JVM Memory
+            
             long memUsed = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
             double memMB = memUsed / (1024.0 * 1024.0);
             double maxMemMB = Runtime.getRuntime().maxMemory() / (1024.0 * 1024.0);
 
-            // System Memory
+            
             OperatingSystemMXBean osMXBean = ManagementFactory.getOperatingSystemMXBean();
             long totalSysMem = 0;
             long freeSysMem = 0;
@@ -547,7 +554,7 @@ public class FreeSRSManager extends Application {
             double dbMB = dbSize / (1024.0 * 1024.0);
             long t = (System.currentTimeMillis() - healthStartTime) / 1000;
 
-            // Format uptime
+            
             long uptimeSec = t;
             String uptimeStr = String.format("%dd %dh %dm %ds",
                     uptimeSec / 86400,
@@ -569,7 +576,7 @@ public class FreeSRSManager extends Application {
             addHealthHistory("DB Size MB", t, dbMB);
             if (healthChart != null) updateHealthChart();
         } catch (Exception e) {
-            // ignore
+            
         }
     }
     private void addHealthHistory(String metric, long t, double value) {
@@ -603,12 +610,13 @@ public class FreeSRSManager extends Application {
         healthChart.getData().add(series);
 
         if (healthChart.getXAxis() instanceof NumberAxis xAxis) {
+            xAxis.setAutoRanging(false);
             if (series.getData().isEmpty()) {
                 xAxis.setLowerBound(0);
                 xAxis.setUpperBound(maxTimeRange);
             } else {
                 xAxis.setLowerBound(minTime);
-                xAxis.setUpperBound(Math.max(currentTime, minTime + 10));
+                xAxis.setUpperBound(currentTime);
                 double tickUnit = switch (currentRange) {
                     case "Day" -> 3600;
                     case "Week" -> 86400;
@@ -618,7 +626,6 @@ public class FreeSRSManager extends Application {
                 };
                 xAxis.setTickUnit(tickUnit);
             }
-            xAxis.setAutoRanging(false);
         }
     }
     private void saveHealthHistory() {
@@ -648,7 +655,7 @@ public class FreeSRSManager extends Application {
                 }
             }
         } catch (Exception e) {
-            // No history file or error reading, start fresh
+            
         }
     }
 
@@ -665,7 +672,7 @@ public class FreeSRSManager extends Application {
             statusLabel.setText("Server started.");
             serverStatusLabel.setText("Server Status: RUNNING");
 
-            // stream output
+            
             exec.submit(() -> streamToLog(serverProcess.getInputStream()));
         } catch (Exception e) {
             statusLabel.setText("Failed to start server: " + e.getMessage());
@@ -689,13 +696,13 @@ public class FreeSRSManager extends Application {
         confirm.showAndWait().ifPresent(btn -> {
             if (btn != ButtonType.YES) return;
 
-            // Attempt graceful shutdown via admin command if possible
+            
             boolean graceful = false;
             if (config.getAdminUser() != null && config.getAdminPass() != null) {
                 try {
                     graceful = tryGracefulShutdown();
                 } catch (Exception e) {
-                    // ignore and fallback
+                    
                     graceful = false;
                 }
             }
@@ -723,21 +730,21 @@ public class FreeSRSManager extends Application {
     }
 
     private boolean tryGracefulShutdown() {
-        // Connect to server, login as admin, send shutdown
+        
         try (Socket s = new Socket("127.0.0.1", config.getPort())) {
             s.setSoTimeout(3000);
             BufferedReader br = new BufferedReader(new InputStreamReader(s.getInputStream()));
             BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(s.getOutputStream()));
 
-            // consume initial welcome lines (non-blocking small wait)
+            
             long end = System.currentTimeMillis() + 500;
             while (System.currentTimeMillis() < end && br.ready()) br.readLine();
 
-            // send login
+            
             String loginCmd = String.format("login %s,%s", config.getAdminUser(), config.getAdminPass());
             bw.write(loginCmd + "\n"); bw.flush();
 
-            // read response lines briefly
+            
             String line;
             boolean loggedIn = false;
             end = System.currentTimeMillis() + 2000;
@@ -748,16 +755,16 @@ public class FreeSRSManager extends Application {
 
             if (!loggedIn) return false;
 
-            // send shutdown
+            
             bw.write("shutdown\n"); bw.flush();
-            // read confirmation
+            
             end = System.currentTimeMillis() + 2000;
             while (System.currentTimeMillis() < end && (line = br.readLine()) != null) {
                 if (line.toLowerCase().contains("shutting down") || line.toLowerCase().contains("success")) {
                     return true;
                 }
             }
-            return true; // assume it will shut down
+            return true; 
         } catch (Exception e) {
             return false;
         }
@@ -806,6 +813,112 @@ public class FreeSRSManager extends Application {
             }
         });
     }
+    
+    private void showDeleteUserDialog() {
+        String selected = userListView.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            showErrorBubble("Select a user to delete");
+            return;
+        }
+
+        String username = selected.split(" ")[0];
+        
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, 
+            "Delete user '" + username + "'? This cannot be undone.", 
+            ButtonType.YES, ButtonType.NO);
+        confirm.setHeaderText(null);
+        confirm.showAndWait().ifPresent(btn -> {
+            if (btn == ButtonType.YES) {
+                try {
+                    if (dbManager.deleteUser(username)) {
+                        refreshUserList();
+                        showSuccessBubble("User deleted: " + username);
+                    } else {
+                        showErrorBubble("Failed to delete user");
+                    }
+                } catch (SQLException e) {
+                    showErrorBubble("Error deleting user: " + e.getMessage());
+                }
+            }
+        });
+    }
+    
+    private void showRenameUserDialog() {
+        String selected = userListView.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            showErrorBubble("Select a user to rename");
+            return;
+        }
+
+        String oldUsername = selected.split(" ")[0];
+        
+        TextInputDialog dialog = new TextInputDialog();
+        dialog.setTitle("Rename User");
+        dialog.setHeaderText("Rename user: " + oldUsername);
+        dialog.setContentText("Enter new username:");
+
+        dialog.showAndWait().ifPresent(newUsername -> {
+            if (newUsername.trim().isEmpty() || newUsername.length() < 3) {
+                showErrorBubble("Username must be at least 3 characters");
+                return;
+            }
+            try {
+                if (dbManager.renameUser(oldUsername, newUsername.trim())) {
+                    refreshUserList();
+                    showSuccessBubble("User renamed: " + oldUsername + " -> " + newUsername);
+                } else {
+                    showErrorBubble("Failed to rename user (may already exist)");
+                }
+            } catch (SQLException e) {
+                showErrorBubble("Error renaming user: " + e.getMessage());
+            }
+        });
+    }
+    
+    private void showResetSystemDialog() {
+        Alert confirm = new Alert(Alert.AlertType.WARNING, 
+            "Reset system? This will:\n" +
+            "- Delete all users\n" +
+            "- Delete all roles\n" +
+            "- Delete all files in VFS\n" +
+            "- Reset metadata\n" +
+            "- Clear health history\n\n" +
+            "This CANNOT be undone!", 
+            ButtonType.YES, ButtonType.NO);
+        confirm.setHeaderText("WARNING: System Reset");
+        confirm.showAndWait().ifPresent(btn -> {
+            if (btn == ButtonType.YES) {
+                try {
+                    if (dbManager != null) {
+                        dbManager.resetDatabase();
+                    }
+                    
+                    Path vfsRoot = Path.of(config.getResourcesPath());
+                    if (Files.exists(vfsRoot)) {
+                        Files.walk(vfsRoot)
+                            .filter(p -> !p.equals(vfsRoot))
+                            .forEach(p -> {
+                                try { Files.deleteIfExists(p); } catch (Exception ignored) {}
+                            });
+                    }
+                    
+                    Path metadataFile = vfsRoot.resolve("server_metadata.json");
+                    if (Files.exists(metadataFile)) {
+                        Files.writeString(metadataFile, "{}");
+                    }
+                    
+                    healthHistory.clear();
+                    java.io.File healthFile = new java.io.File(HEALTH_HISTORY_FILE);
+                    if (healthFile.exists()) healthFile.delete();
+                    
+                    refreshUserList();
+                    showSuccessBubble("System reset complete");
+                } catch (Exception e) {
+                    showErrorBubble("Error resetting system: " + e.getMessage());
+                }
+            }
+        });
+    }
 
     private Tab createConnectionLogsTab() {
         Tab tab = new Tab("Connection Logs");
@@ -851,7 +964,7 @@ public class FreeSRSManager extends Application {
             public void run() {
                 Platform.runLater(() -> refreshConnectionLog());
             }
-        }, 0, 5000); // Update every 5 seconds
+        }, 0, 5000); 
     }
 
     private void stopConnectionLogMonitor() {
@@ -864,14 +977,14 @@ public class FreeSRSManager extends Application {
     private void refreshConnectionLog() {
         if (connectionLog == null) return;
 
-        // Simulate connection info - in real scenario, would query server
+        
         String timestamp = new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date());
 
-        // Keep log size manageable
+        
         String currentText = connectionLog.getText();
         String[] lines = currentText.split("\n");
         if (lines.length > 100) {
-            // Keep only last 80 lines
+            
             StringBuilder sb = new StringBuilder();
             for (int i = lines.length - 80; i < lines.length; i++) {
                 sb.append(lines[i]).append("\n");
@@ -881,8 +994,8 @@ public class FreeSRSManager extends Application {
     }
 
     private int getActiveConnections() {
-        // This should query the server for active connections; fallback to 0
-        // If manager runs in same JVM, can access ClientManager; otherwise, use a socket or status file
+        
+        
         return 0;
     }
     private double getCpuLoad() {

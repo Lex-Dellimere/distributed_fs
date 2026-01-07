@@ -2,10 +2,6 @@ package org.example.client;
 
 import java.util.Date;
 
-/**
- * Immutable client information for DFS sessions.
- * All fields must be non-null.
- */
 public record ClientInfo(
     int clientId,
     String username,

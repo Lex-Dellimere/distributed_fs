@@ -14,7 +14,6 @@ import javafx.scene.layout.*;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 
-import java.io.IOException;
 import java.util.Map;
 import java.util.Optional;
 
@@ -26,8 +25,7 @@ public class GUIClient extends Application {
     private TextArea outputArea;
     private TextArea debugArea;
     private TextField commandField;
-    //private TextField commandField;
-    private ListView<String> historyBox;
+    
     private TextField hostField;
     private TextField portField;
     private Label userLabel;
@@ -35,7 +33,6 @@ public class GUIClient extends Application {
     private ListView<String> clientsList;
     private Button connectBtn;
     private StackPane notificationPane;
-    private BorderPane root;
 
     private final ObservableList<String> history = FXCollections.observableArrayList();
 
@@ -45,13 +42,28 @@ public class GUIClient extends Application {
         processor = new CommandProcessor(connection, this::log, this::showNotification);
         credentialStore = new CredentialStore();
 
-        // Redirect System.err and System.out to debug area
+        // Register a handler to be notified when the underlying socket/connection is closed unexpectedly
+        connection.setOnConnectionClosed(reason -> {
+            Platform.runLater(() -> {
+                debugLog("[CONN] Connection closed: " + reason);
+                showNotification("Disconnected: " + reason, "error");
+                // Update UI to disconnected state
+                connectBtn.setText("Connect");
+                connectBtn.setDisable(false);
+                commandField.setDisable(true);
+                updateUserInfo();
+                // Ensure internal connection state is stopped
+                try {
+                    connection.stop();
+                } catch (Exception ignored) {}
+            });
+        });
+
         setupDebugLogging();
 
-        root = new BorderPane();
+        BorderPane root = new BorderPane();
         root.setPadding(new Insets(10));
 
-        // LEFT: User info, Client list and History
         VBox leftPane = new VBox(10);
         leftPane.setPrefWidth(250);
         leftPane.setPadding(new Insets(0, 10, 0, 0));
@@ -63,7 +75,7 @@ public class GUIClient extends Application {
         clientsList = new ListView<>();
         clientsList.setPrefHeight(200);
         
-        historyBox = new ListView<>(history);
+        ListView<String> historyBox = new ListView<>(history);
         historyBox.setPrefHeight(200);
         historyBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null) commandField.setText(newVal);
@@ -72,7 +84,7 @@ public class GUIClient extends Application {
         leftPane.getChildren().addAll(userLabel, roleLabel, clientsHeader, clientsList, new Label("History"), historyBox);
         root.setLeft(leftPane);
 
-        // RIGHT: Server and Port
+        
         VBox rightPane = new VBox(10);
         rightPane.setPrefWidth(150);
         rightPane.setPadding(new Insets(0, 0, 0, 10));
@@ -95,18 +107,18 @@ public class GUIClient extends Application {
         rightPane.getChildren().addAll(new Label("Server"), hostField, new Label("Port"), portField, connectBtn, logoutBtn);
         root.setRight(rightPane);
 
-        // CENTER: Tabbed output area
+        
         TabPane centerTabs = new TabPane();
         centerTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
-        // Main output tab
+        
         Tab outputTab = new Tab("Output");
         outputArea = new TextArea();
         outputArea.setEditable(false);
         outputArea.setWrapText(true);
         outputTab.setContent(outputArea);
 
-        // Debug tab
+        
         Tab debugTab = new Tab("Debug");
         debugArea = new TextArea();
         debugArea.setEditable(false);
@@ -123,7 +135,7 @@ public class GUIClient extends Application {
         centerTabs.getTabs().addAll(outputTab, debugTab);
         root.setCenter(centerTabs);
 
-        // BOTTOM: Input
+        
         VBox bottomPane = new VBox(5);
         bottomPane.setPadding(new Insets(10, 0, 0, 0));
         
@@ -131,7 +143,7 @@ public class GUIClient extends Application {
         commandField = new TextField();
         commandField.setPromptText("Enter command here...");
         commandField.setPrefHeight(60);
-        commandField.setDisable(true); // Disabled until authenticated
+        commandField.setDisable(true); 
         HBox.setHgrow(commandField, Priority.ALWAYS);
         commandField.setOnAction(e -> handleCommand());
 
@@ -144,20 +156,26 @@ public class GUIClient extends Application {
         bottomPane.getChildren().addAll(inputRow);
         root.setBottom(bottomPane);
 
-        // Wrap root in StackPane for notifications
+        
         StackPane mainStack = new StackPane();
         mainStack.getChildren().add(root);
 
-        // Notification pane (initially empty, on top)
         notificationPane = new StackPane();
-        notificationPane.setPickOnBounds(false); // Allow clicks through empty space
+        notificationPane.setPickOnBounds(false); 
         notificationPane.setAlignment(Pos.TOP_CENTER);
         notificationPane.setPadding(new Insets(10));
         mainStack.getChildren().add(notificationPane);
 
         Scene scene = new Scene(mainStack, 900, 600);
-        String css = getClass().getResource("/style.css").toExternalForm();
-        scene.getStylesheets().add(css);
+        try {
+            var res = getClass().getResource("/style.css");
+            if (res != null) {
+                String css = res.toExternalForm();
+                scene.getStylesheets().add(css);
+            }
+        } catch (Exception ignored) {
+            // If CSS fails to load, proceed without it.
+        }
 
         primaryStage.setTitle("Distributed File System Client");
         primaryStage.setScene(scene);
@@ -174,7 +192,7 @@ public class GUIClient extends Application {
     }
 
     private void setupDebugLogging() {
-        // Capture System.out
+        
         java.io.PrintStream originalOut = System.out;
         System.setOut(new java.io.PrintStream(new java.io.OutputStream() {
             private final StringBuilder buffer = new StringBuilder();
@@ -191,7 +209,7 @@ public class GUIClient extends Application {
             }
         }));
 
-        // Capture System.err
+        
         java.io.PrintStream originalErr = System.err;
         System.setErr(new java.io.PrintStream(new java.io.OutputStream() {
             private final StringBuilder buffer = new StringBuilder();
@@ -286,19 +304,17 @@ public class GUIClient extends Application {
 
     private void handleAuthentication() {
         debugLog("[AUTH] Starting authentication");
-        // Check for stored credentials first
         if (credentialStore.hasStoredCredentials()) {
             debugLog("[AUTH] Found stored credentials, attempting auto-login");
             Map<String, String> creds = credentialStore.loadCredentials();
             if (creds != null && creds.containsKey("username") && creds.containsKey("password")) {
                 connectBtn.setText("Authenticating...");
-                attemptLogin(creds.get("username"), creds.get("password"), true);
+                attemptLogin(creds.get("username"), creds.get("password"));
                 return;
             }
         }
 
         debugLog("[AUTH] No stored credentials, showing auth dialog");
-        // Show auth dialog if no stored credentials
         showAuthDialog();
     }
 
@@ -322,14 +338,24 @@ public class GUIClient extends Application {
         new Thread(() -> {
             try {
                 String authCommand;
-                String hashedPassword = null;
+                String hashedPassword = null; // for signup or stored hash
+
+                // Check if there are stored credentials for the username
+                Map<String, String> stored = credentialStore.loadCredentials();
 
                 switch (authResult.type()) {
                     case LOGIN:
-                        hashedPassword = Connection.hashPassword(authResult.password());
-                        authCommand = "login " + authResult.username() + " " + hashedPassword;
+                        // If we have stored credentials for this username, use the stored hashed password
+                        if (stored != null && authResult.username().equals(stored.get("username")) && stored.get("password") != null) {
+                            hashedPassword = stored.get("password");
+                            authCommand = "login " + authResult.username() + " " + hashedPassword;
+                        } else {
+                            // No stored hashed password: send plaintext to server (server will accept plaintext)
+                            authCommand = "login " + authResult.username() + " " + authResult.password();
+                        }
                         break;
                     case SIGNUP:
+                        // Hash password before sending so server stores the client-side hash.
                         hashedPassword = Connection.hashPassword(authResult.password());
                         authCommand = "signup " + authResult.username() + " " + hashedPassword;
                         break;
@@ -352,10 +378,12 @@ public class GUIClient extends Application {
                 Platform.runLater(() -> {
                     if (response.equals("SUCCESS")) {
                         debugLog("[AUTH] Login successful: " + connection.getUsername() + " [" + connection.getRole() + "]");
-                        if (authResult.type() == AuthType.LOGIN && finalHashedPassword != null) {
+                        // If this was a signup flow, save the hashed password locally so future auto-login can reuse the same bcrypt string
+                        if (authResult.type() == AuthType.SIGNUP && finalHashedPassword != null) {
                             credentialStore.saveCredentials(authResult.username(), finalHashedPassword);
-                            debugLog("[AUTH] Credentials saved to store");
+                            debugLog("[AUTH] Hashed credentials saved to store");
                         }
+                        // If login used stored credentials, keep them; if login used plaintext and server accepted, we won't save plaintext.
                         showNotification("Logged in as " + connection.getUsername() + " [" + connection.getRole() + "]", "success");
                         connectBtn.setText("Disconnect");
                         connectBtn.setDisable(false);
@@ -399,11 +427,14 @@ public class GUIClient extends Application {
         }).start();
     }
 
-    private void attemptLogin(String username, String hashedPassword, boolean isStoredCredential) {
-        debugLog("[LOGIN] Attempting login for: " + username + " (stored: " + isStoredCredential + ")");
+    private void attemptLogin(String username, String password) {
+        debugLog("[LOGIN] Attempting login for: " + username);
         new Thread(() -> {
             try {
-                String authCommand = "login " + username + " " + hashedPassword;
+                // The 'password' parameter here is expected to be the stored hashed password
+                // when calling from auto-login. We always send the password value as-is (it
+                // may be a bcrypt hash). This ensures we never send raw plaintext from stored creds.
+                String authCommand = "login " + username + " " + password;
                 String response = connection.authenticate(authCommand);
 
                 Platform.runLater(() -> {
@@ -417,32 +448,19 @@ public class GUIClient extends Application {
                         startStatusUpdateLoop();
                     } else {
                         debugLog("[LOGIN] Login failed: " + response);
-                        if (isStoredCredential) {
-                            credentialStore.clearCredentials();
-                            debugLog("[LOGIN] Cleared invalid stored credentials");
-                            showNotification("Stored credentials invalid. Please login again.", "warning");
-                            showAuthDialog();
-                        } else {
-                            showNotification("Authentication failed", "error");
-                            connectBtn.setText("Connect");
-                            connectBtn.setDisable(false);
-                            connection.stop();
-                        }
+                        // If auto-login fails, clear credentials to avoid repeated invalid attempts
+                        credentialStore.clearCredentials();
+                        debugLog("[LOGIN] Cleared invalid stored credentials");
+                        showNotification("Stored credentials invalid. Please login again.", "warning");
+                        showAuthDialog();
                     }
                 });
             } catch (Exception e) {
                 debugLog("[LOGIN] Exception: " + e.getMessage());
                 Platform.runLater(() -> {
-                    if (isStoredCredential) {
-                        credentialStore.clearCredentials();
-                        showNotification("Login failed. Please try again.", "error");
-                        showAuthDialog();
-                    } else {
-                        showNotification("Authentication error: " + e.getMessage(), "error");
-                        connectBtn.setText("Connect");
-                        connectBtn.setDisable(false);
-                        connection.stop();
-                    }
+                    credentialStore.clearCredentials();
+                    showNotification("Login failed. Please try again.", "error");
+                    showAuthDialog();
                 });
             }
         }).start();
@@ -491,20 +509,23 @@ public class GUIClient extends Application {
         Thread loop = new Thread(() -> {
             while (connection.isConnected() && connection.isAuthenticated()) {
                 try {
-                    // Periodically refresh client list (only if authenticated)
-                    String response = connection.sendAndWaitForResponse("listclients", 2000);
-                    if (response != null && !response.startsWith("ERROR:")) {
-                        String[] lines = response.split("\n");
-                        Platform.runLater(() -> {
-                            clientsList.getItems().clear();
-                            for (String line : lines) {
-                                if (line.contains("(Offline)")) {
-                                    clientsList.getItems().add("  " + line);
-                                } else {
-                                    clientsList.getItems().add(line);
+                    // Only request list of clients if the connected user is an admin to avoid
+                    // repeated permission-denied responses for guest users.
+                    if (connection.getRole() != null && connection.getRole().equalsIgnoreCase("admin")) {
+                        String response = connection.sendAndWaitForResponse("listclients", 2000);
+                        if (response != null && !response.startsWith("ERROR:")) {
+                            String[] lines = response.split("\n");
+                            Platform.runLater(() -> {
+                                clientsList.getItems().clear();
+                                for (String line : lines) {
+                                    if (line.contains("(Offline)")) {
+                                        clientsList.getItems().add("  " + line);
+                                    } else {
+                                        clientsList.getItems().add(line);
+                                    }
                                 }
-                            }
-                        });
+                            });
+                        }
                     }
 
                     Platform.runLater(this::updateUserInfo);
@@ -525,30 +546,25 @@ public class GUIClient extends Application {
         });
     }
 
-    /**
-     * Shows a notification popup at the top of the screen
-     * @param message the message to display
-     * @param type notification type: "error", "success", "info", "warning"
-     */
     private void showNotification(String message, String type) {
         Platform.runLater(() -> {
-            // Create notification label
+            
             Label notification = new Label(message);
             notification.setWrapText(true);
             notification.setMaxWidth(600);
             notification.setPadding(new Insets(15, 20, 15, 20));
             notification.setStyle(getNotificationStyle(type));
 
-            // Add to notification pane
+            
             notificationPane.getChildren().add(notification);
 
-            // Auto-hide after 4 seconds
+            
             Timeline timeline = new Timeline(new KeyFrame(Duration.seconds(4), e -> {
                 notificationPane.getChildren().remove(notification);
             }));
             timeline.play();
 
-            // Allow manual dismiss on click
+            
             notification.setOnMouseClicked(e -> {
                 notificationPane.getChildren().remove(notification);
                 timeline.stop();
@@ -564,7 +580,7 @@ public class GUIClient extends Application {
             case "error" -> baseStyle + " -fx-background-color: #d32f2f; -fx-text-fill: white;";
             case "success" -> baseStyle + " -fx-background-color: #388e3c; -fx-text-fill: white;";
             case "warning" -> baseStyle + " -fx-background-color: #f57c00; -fx-text-fill: white;";
-            default -> baseStyle + " -fx-background-color: #1976d2; -fx-text-fill: white;"; // info
+            default -> baseStyle + " -fx-background-color: #1976d2; -fx-text-fill: white;"; 
         };
     }
 

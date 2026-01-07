@@ -5,14 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Local credential store for saving client credentials.
- */
 public class CredentialStore {
     private static final String STORE_FILE = System.getProperty("user.home") + "/.dfs_credentials.json";
     private final ObjectMapper mapper = new ObjectMapper();
@@ -28,16 +24,18 @@ public class CredentialStore {
         }
     }
 
+    @SuppressWarnings("unchecked")
     public Map<String, String> loadCredentials() {
         try {
             File file = new File(STORE_FILE);
             if (file.exists()) {
-                return mapper.readValue(file, Map.class);
+                Map<String, String> m = mapper.readValue(file, Map.class);
+                return m != null ? m : new HashMap<>();
             }
         } catch (IOException e) {
             System.err.println("Failed to load credentials: " + e.getMessage());
         }
-        return null;
+        return new HashMap<>();
     }
 
     public void clearCredentials() {

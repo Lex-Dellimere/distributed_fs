@@ -22,23 +22,17 @@ public class DatabaseManager {
         this.config = config;
     }
 
-    /**
-     * Initializes the database, creating tables and default roles if needed.
-     * Uses SQLite as the SQL dialect.
-     *
-     * @throws SQLException if a database error occurs
-     */
     public void initialize() throws SQLException {
-        // Determine SQLite database path
+        
         String sqlitePath = null;
 
         if (config.getDb() != null && config.getDb().sqlitePath() != null && !config.getDb().sqlitePath().trim().isEmpty()) {
             sqlitePath = config.getDb().sqlitePath().trim();
         }
 
-        // If no path configured or file doesn't exist, search for existing database
+        
         if (sqlitePath == null || !Files.exists(Path.of(sqlitePath))) {
-            // Try to find existing database
+            
             List<String> candidates = Arrays.asList(
                 "dfs_database.db",
                 "freedrs.db",
@@ -55,23 +49,23 @@ public class DatabaseManager {
                 }
             }
 
-            // If no database found, create new one
+            
             if (sqlitePath == null) {
                 sqlitePath = "dfs_database.db";
                 System.out.println("Creating new database: " + sqlitePath);
             }
 
-            // Update config with resolved path
+            
             config.setDb(new DatabaseConfig(sqlitePath));
             config.save();
         } else {
             System.out.println("Using configured database: " + sqlitePath);
         }
 
-        // SQLite will auto-create the database file if it doesn't exist
+        
         connection = DriverManager.getConnection("jdbc:sqlite:" + sqlitePath);
 
-        // Set proper file permissions on newly created database (POSIX systems only)
+        
         try {
             Path dbPath = Path.of(sqlitePath);
             if (Files.exists(dbPath)) {
@@ -79,11 +73,11 @@ public class DatabaseManager {
                 Files.setPosixFilePermissions(dbPath, perms);
             }
         } catch (UnsupportedOperationException | IOException ignored) {
-            // ignore on non-POSIX systems or if permissions can't be set
+            
         }
 
         try (Statement stmt = connection.createStatement()) {
-            // Users table
+            
             String idCol = "INTEGER PRIMARY KEY AUTOINCREMENT";
             stmt.execute("CREATE TABLE IF NOT EXISTS users (" +
                     "id " + idCol + "," +
@@ -92,13 +86,13 @@ public class DatabaseManager {
                     "role VARCHAR(50) NOT NULL" +
                     ")");
 
-            // Roles/permissions table: name (unique), commands (comma-separated)
+            
             stmt.execute("CREATE TABLE IF NOT EXISTS roles (" +
                     "name VARCHAR(50) UNIQUE NOT NULL," +
                     "commands TEXT NOT NULL" +
                     ")");
 
-            // Seed only admin and guest roles
+            
             if (getRoleCommands("admin") == null) {
                 createOrUpdateRole("admin", "*");
             }
@@ -110,26 +104,24 @@ public class DatabaseManager {
         }
     }
 
-    /**
-     * Registers a new user with the given username, password, and role.
-     *
-     * @param username the username
-     * @param password the password
-     * @param role     the role
-     * @return true if registration succeeded, false if username exists
-     * @throws SQLException if a database error occurs
-     */
     public boolean registerUser(String username, String password, String role) throws SQLException {
-        // Check for existing username
+        
         if (getUserByUsername(username) != null) {
-            return false; // duplicate
+            return false; 
         }
 
-        String hash = BCrypt.hashpw(password, BCrypt.gensalt());
+        // If the client supplied a bcrypt hash (starts with $2a$ or $2b$ or $2y$), store it as-is.
+        String hashToStore;
+        if (password != null && (password.startsWith("$2a$") || password.startsWith("$2b$") || password.startsWith("$2y$"))) {
+            hashToStore = password;
+        } else {
+            hashToStore = BCrypt.hashpw(password, BCrypt.gensalt());
+        }
+
         String sql = "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setString(1, username);
-            pstmt.setString(2, hash);
+            pstmt.setString(2, hashToStore);
             pstmt.setString(3, role);
             return pstmt.executeUpdate() > 0;
         }
@@ -154,8 +146,17 @@ public class DatabaseManager {
             ResultSet rs = pstmt.executeQuery();
             if (rs.next()) {
                 String hash = rs.getString("password_hash");
-                if (BCrypt.checkpw(password, hash)) {
-                    return new User(rs.getInt("id"), username, rs.getString("role"));
+
+                // If client sent a bcrypt hash (pre-hashed), compare directly to stored hash
+                if (password != null && (password.startsWith("$2a$") || password.startsWith("$2b$") || password.startsWith("$2y$"))) {
+                    if (hash.equals(password)) {
+                        return new User(rs.getInt("id"), username, rs.getString("role"));
+                    }
+                } else {
+                    // Client sent plaintext; verify using BCrypt as before
+                    if (BCrypt.checkpw(password, hash)) {
+                        return new User(rs.getInt("id"), username, rs.getString("role"));
+                    }
                 }
             }
         }
@@ -171,12 +172,6 @@ public class DatabaseManager {
         }
     }
 
-    /**
-     * Returns a list of all users in the database.
-     *
-     * @return list of users
-     * @throws SQLException if a database error occurs
-     */
     public List<User> getAllUsers() throws SQLException {
         String sql = "SELECT id, username, role FROM users";
         try (PreparedStatement stmt = connection.prepareStatement(sql);
@@ -189,7 +184,7 @@ public class DatabaseManager {
         }
     }
 
-    // Role management
+    
     public void createOrUpdateRole(String roleName, String commaSeparatedCommands) throws SQLException {
         String existing = getRoleCommands(roleName);
         if (existing == null) {
@@ -209,12 +204,6 @@ public class DatabaseManager {
         }
     }
 
-    /**
-     * Returns a list of all roles in the database.
-     *
-     * @return list of role names
-     * @throws SQLException if a database error occurs
-     */
     public List<String> getAllRoles() throws SQLException {
         String sql = "SELECT name FROM roles";
         List<String> roles = new ArrayList<>();
@@ -247,18 +236,9 @@ public class DatabaseManager {
         }
     }
 
-    /**
-     * Checks if a command is NOT allowed for a given role.
-     *
-     * @param roleName the role name
-     * @param command  the command
-     * @return true if forbidden, false if allowed
-     * @throws SQLException if a database error occurs
-     */
     public boolean isCommandForbidden(String roleName, String command) throws SQLException {
         String commands = getRoleCommands(roleName);
         if (commands == null) {
-            // If role not found, treat as restrictive: only allow a small set (fallback)
             return !List.of("list","pwd","cd","help","whoami","quit","exit").contains(command);
         }
         if (commands.trim().equals("*")) return false;
@@ -267,5 +247,40 @@ public class DatabaseManager {
                 .filter(s -> !s.isEmpty())
                 .toList();
         return !allowed.contains(command);
+    }
+    
+    public boolean deleteUser(String username) throws SQLException {
+        String sql = "DELETE FROM users WHERE username = ?";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setString(1, username);
+            return pstmt.executeUpdate() > 0;
+        }
+    }
+    
+    public boolean renameUser(String oldUsername, String newUsername) throws SQLException {
+        if (getUserByUsername(newUsername) != null) {
+            return false;
+        }
+        String sql = "UPDATE users SET username = ? WHERE username = ?";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setString(1, newUsername);
+            pstmt.setString(2, oldUsername);
+            return pstmt.executeUpdate() > 0;
+        }
+    }
+    
+    public void resetDatabase() throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("DELETE FROM users");
+            stmt.execute("DELETE FROM roles");
+            if (getRoleCommands("admin") == null) {
+                createOrUpdateRole("admin", "*");
+            }
+            if (getRoleCommands("guest") == null) {
+                createOrUpdateRole("guest", String.join(",",
+                        Arrays.asList("list","pwd","cd","help","whoami","quit","exit")
+                ));
+            }
+        }
     }
 }

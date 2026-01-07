@@ -34,7 +34,7 @@ public class ServerConfig {
         }
     }
 
-    // Getters and Setters
+    
     public int getPort() { return port; }
     public void setPort(int port) { this.port = port; }
     public String getResourcesPath() { return resourcesPath; }

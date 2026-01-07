@@ -18,10 +18,6 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 
-/**
- * Handles a client session for the distributed file system server.
- * Uses modern Java features and best practices.
- */
 public class ClientSessionHandler implements Runnable {
     private final Socket clientSocket;
     private final ClientManager clientManager;
@@ -32,7 +28,7 @@ public class ClientSessionHandler implements Runnable {
     private BufferedReader input;
     private PrintWriter output;
 
-    // Constants for error messages
+    
     private static final String ERR_INVALID_FORMAT = "ERROR: Invalid format. Use: login <user> <pass>, signup <user> <pass> OR guest";
     private static final String ERR_UNKNOWN_CMD = "ERROR: Unknown command. Use login or signup.";
     private static final String ERR_DB = "ERROR: Database error: ";
@@ -52,48 +48,69 @@ public class ClientSessionHandler implements Runnable {
 
     @Override
     public void run() {
+        System.out.println("[SERVER] Client session handler started for " + clientSocket.getRemoteSocketAddress());
         try {
             input = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
             output = new PrintWriter(clientSocket.getOutputStream(), true);
+            System.out.println("[SERVER] Streams initialized, starting authentication");
 
             if (!authenticate()) {
+                System.out.println("[SERVER] Authentication failed or signup completed, closing connection");
                 return;
             }
 
+            System.out.println("[SERVER] Authentication successful, processing commands");
             processCommands();
 
         } catch (IOException e) {
-            System.err.println("Client session error: " + e.getMessage());
+            System.err.println("[SERVER] Client session error: " + e.getMessage());
+            e.printStackTrace();
         } finally {
             cleanup();
         }
     }
 
     private boolean authenticate() throws IOException {
+        System.out.println("[SERVER] Sending greeting messages");
         output.println("=== Distributed File System ===");
         output.println("Available: login <user> <pass> OR signup <user> <pass> OR guest");
+        output.flush();
+        System.out.println("[SERVER] Waiting for authentication command");
+        
         while (true) {
             String line = input.readLine();
-            if (line == null) return false;
+            System.out.println("[SERVER] Received line: " + line);
+            if (line == null) {
+                System.out.println("[SERVER] Client disconnected (null line)");
+                return false;
+            }
             String trimmedLine = line.trim();
-            if (trimmedLine.isEmpty()) continue;
+            if (trimmedLine.isEmpty()) {
+                System.out.println("[SERVER] Empty line, continuing");
+                continue;
+            }
             
             if (trimmedLine.equalsIgnoreCase("guest")) {
                 clientInfo = clientManager.registerClient("guest_" + (int)(Math.random() * 10000), "guest");
                 output.println(SUCCESS_GUEST);
                 output.println(HELP_PROMPT);
+                output.flush();
+                System.out.println("[SERVER] Guest login successful");
                 return true;
             }
             
             String[] parts = trimmedLine.split("\\s+", 3);
             if (parts.length < 3) {
+                System.out.println("[SERVER] Invalid format, parts.length=" + parts.length);
                 output.println(ERR_INVALID_FORMAT);
+                output.flush();
                 continue;
             }
             
             String cmd = parts[0].toLowerCase();
             String username = parts[1].trim();
             String password = parts[2].trim();
+            System.out.println("[SERVER] Command: " + cmd + ", username: " + username);
             
             try {
                 if (cmd.equals("login")) {
@@ -102,22 +119,41 @@ public class ClientSessionHandler implements Runnable {
                         clientInfo = clientManager.registerClient(user.username(), user.role());
                         output.println(String.format(SUCCESS_LOGIN, user.username(), user.role()));
                         output.println(HELP_PROMPT);
+                        output.flush();
+                        System.out.println("[SERVER] Login successful for " + username);
                         return true;
                     } else {
+                        System.out.println("[SERVER] Invalid credentials for " + username);
                         output.println(ERR_INVALID_USER_PASS);
+                        output.flush();
                     }
                 } else if (cmd.equals("signup")) {
+                    System.out.println("[SERVER] Processing signup for " + username);
                     if (dbManager.registerUser(username, password, "guest")) {
+                        System.out.println("[SERVER] Signup successful, sending response");
                         output.println(SUCCESS_REGISTER);
+                        output.flush();
+                        System.out.println("[SERVER] Response sent, waiting before closing connection");
+                        Thread.sleep(500);
+                        System.out.println("[SERVER] Returning false to close connection");
                         return false;
                     } else {
+                        System.out.println("[SERVER] Duplicate user: " + username);
                         output.println(ERR_DUPLICATE_USER);
+                        output.flush();
                     }
                 } else {
+                    System.out.println("[SERVER] Unknown command: " + cmd);
                     output.println(ERR_UNKNOWN_CMD);
+                    output.flush();
                 }
             } catch (SQLException e) {
+                System.err.println("[SERVER] Database error: " + e.getMessage());
                 output.println(ERR_DB + e.getMessage());
+                output.flush();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
             }
         }
     }
@@ -142,7 +178,7 @@ public class ClientSessionHandler implements Runnable {
                     List<String> roles = dbManager.getAllRoles();
                     return String.join(", ", roles);
                 case "createrole":
-                    // args: roleName cmd1,cmd2,...
+                    
                      String[] parts = args.split("\\s+", 2);
                     if (parts.length != 2) return "ERROR: Usage: createrole <role> <comma-separated-commands>";
                     dbManager.createOrUpdateRole(parts[0], parts[1]);
@@ -151,8 +187,27 @@ public class ClientSessionHandler implements Runnable {
                     if (args.isEmpty()) return "ERROR: Usage: deleterole <role>";
                     dbManager.deleteRole(args.trim());
                     return "SUCCESS: Role deleted";
+                case "deleteuser":
+                    if (args.isEmpty()) return "ERROR: Usage: deleteuser <username>";
+                    if (dbManager.deleteUser(args.trim())) {
+                        return "SUCCESS: User deleted";
+                    } else {
+                        return "ERROR: User not found";
+                    }
+                case "renameuser":
+                    String[] renameParts = args.split("\\s+", 2);
+                    if (renameParts.length != 2) return "ERROR: Usage: renameuser <old-username> <new-username>";
+                    if (dbManager.renameUser(renameParts[0], renameParts[1])) {
+                        return "SUCCESS: User renamed";
+                    } else {
+                        return "ERROR: Failed to rename user (may already exist)";
+                    }
+                case "resetsystem":
+                    dbManager.resetDatabase();
+                    vfs.loadExistingFiles();
+                    return "SUCCESS: System reset complete";
                 case "shutdown":
-                    // only admin allowed and intention is to stop the server
+                    
                     new Thread(() -> {
                         try { Thread.sleep(500); } catch (InterruptedException ignored) {}
                         System.exit(0);
@@ -163,6 +218,8 @@ public class ClientSessionHandler implements Runnable {
             }
         } catch (SQLException e) {
             return "ERROR: DB error: " + e.getMessage();
+        } catch (IOException e) {
+            return "ERROR: IO error: " + e.getMessage();
         }
     }
 
@@ -175,7 +232,12 @@ public class ClientSessionHandler implements Runnable {
         String cmd = parts[0].toLowerCase();
         String args = parts.length > 1 ? parts[1] : "";
 
-        // Permission check via DB
+        
+        // Heartbeat: reply to PING immediately and don't apply permission checks
+        if (cmd.equalsIgnoreCase("ping")) {
+            return "PONG";
+        }
+
         try {
             if (dbManager.isCommandForbidden(clientInfo.role(), cmd)) {
                 return "ERROR: Permission denied. Your role does not allow this command.";
@@ -185,8 +247,8 @@ public class ClientSessionHandler implements Runnable {
         }
 
         try {
-            // Admin commands handled here
-            if (List.of("listroles","createrole","deleterole","shutdown").contains(cmd)) {
+            
+            if (List.of("listroles","createrole","deleterole","shutdown","deleteuser","renameuser","resetsystem").contains(cmd)) {
                 if (dbManager.isCommandForbidden(clientInfo.role(), cmd)) {
                     return "ERROR: Permission denied. Admin only.";
                 }
@@ -453,7 +515,7 @@ public class ClientSessionHandler implements Runnable {
             }
             if (commands.trim().equals("*")) {
                 sb.append("All commands available (admin)\n");
-                // Show general examples
+                
                 sb.append("Examples:\n");
                 sb.append("  upload /home/user/file.txt\n");
                 sb.append("  download file.txt\n");
@@ -484,11 +546,6 @@ public class ClientSessionHandler implements Runnable {
         return sb.toString();
     }
 
-    /**
-     * Normalizes a remote path relative to current directory.
-     * @param remotePath the path to normalize
-     * @return normalized absolute path without leading slash
-     */
     private String normalizePath(String remotePath) {
         if (!remotePath.startsWith("/")) {
             String currentDir = clientInfo.currentDirectory();

@@ -93,9 +93,6 @@ public class DFSServer {
         }
     }
 
-    /**
-     * Stops the server gracefully. Used by management GUI.
-     */
     public void stop() {
         running.set(false);
         try {
@@ -114,16 +111,10 @@ public class DFSServer {
         System.out.println("Total clients served: " + clientManager.getClientCount());
     }
 
-    /**
-     * Gets the client manager for monitoring. Used by management GUI.
-     */
     public ClientManager getClientManager() {
         return clientManager;
     }
 
-    /**
-     * Checks if server is running. Used by management GUI.
-     */
     public boolean isRunning() {
         return running.get();
     }

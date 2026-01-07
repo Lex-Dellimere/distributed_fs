@@ -4,9 +4,6 @@ import java.util.Date;
 import java.nio.file.Path;
 import java.io.IOException;
 
-/**
- * Immutable file entry for the virtual file system.
- */
 public record FileEntry(String path, long size, String owner, int ownerId, Date createdAt, EntryType type) {
     public static FileEntry fromPath(Path path) throws IOException {
         return new FileEntry(

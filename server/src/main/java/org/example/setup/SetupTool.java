@@ -35,7 +35,7 @@ public class SetupTool {
             config.save();
             System.out.println("Configuration saved to server_config.json");
 
-            // Initialize DB via DatabaseManager
+            
             try {
                 org.example.db.DatabaseManager dbManager = new org.example.db.DatabaseManager(config);
                 dbManager.initialize();
