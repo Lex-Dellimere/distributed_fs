@@ -1,4 +1,4 @@
-# Distributed File System (DFS) - Java
+# FreeDRS (Distributed Resource System) - Java
 
 <img width="2058" height="530" alt="DFS" src="https://github.com/user-attachments/assets/e9bc1038-e124-4cd3-81cc-203df6e6b45f" />
 
